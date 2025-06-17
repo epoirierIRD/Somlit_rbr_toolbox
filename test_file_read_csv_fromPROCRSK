@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Jun 13 16:14:41 2025
+
+@author: epoirier
+"""
+
+import pandas as pd
+
+input_file='/home/epoirier/Documents/PROJETS/2025/Proc_RBR_Somlit/20240606/downcast/231853_20240607_1104 somlit 21_profile0.csv'
+'''
+# lecteur qui prend en compte les décimales sur le format d'heure
+df1 = pd.read_csv(input_file,
+                  skiprows=19
+                  parse_dates=['date'],
+                  sep=';',
+                  date_parser=lambda x: pd.to_datetime(x, format='%Y-%m-%d %H:%M:%S,%f')
+                  )
+'''
+
+# # File paths
+# input_file = "231853_20240607_1104 somlit 21_profile0.csv"
+
+# output_file = "forsomlit.csv"
+
+# # Desired column names (in order)
+# columns_to_keep = ["dateTime", "temperature", "chlorophyll-a", "par", "salinity", "depth"]
+
+# # Step 1: Find the last line starting with '//'
+# with open(input_file, 'r') as f:
+#     lines = f.readlines()
+
+# # Step 2: Identify the last header line (assumes it's the last one starting with '//')
+# header_line_index = max(i for i, line in enumerate(lines) if line.startswith("//"))
+# header_line = lines[header_line_index][2:].strip()  # remove '//' and strip whitespace
+
+# # Step 3: Create a temporary CSV with only relevant data
+# data_lines = lines[header_line_index + 1:]
+# csv_content = header_line + '\n' + ''.join(data_lines)
+
+# # Step 4: Read CSV from the cleaned string using StringIO
+# from io import StringIO
+# df = pd.read_csv(StringIO(csv_content))
+
+# # Step 5: Keep only the desired columns (silently skip if not present)
+# df = df[[col for col in columns_to_keep if col in df.columns]]
+# df = df.reindex(columns=columns_to_keep)
+
+# # Step 6: Drop rows with NaN
+# df = df.dropna()
+
+# # Step 7: Save cleaned data
+# df.to_csv(output_file, index=False)
+# print(f"✅ Cleaned file saved as: {output_file}")

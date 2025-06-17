@@ -107,6 +107,7 @@ def plot_raw_proc(rsk_cast, rsk, param, cast, profile, uncertainty=None):
 # ************************************************************************
 # Plot down cast and upcast on the same graph, the option is not working
 # in plotprofile when setting direction=both, RBR has been contacted for that
+# function below is sober and does not include uncertainties
 
 def plot_up_down(rsk_d, rsk_u, param, profile_nb):
     # args:
@@ -134,8 +135,8 @@ def plot_up_down(rsk_d, rsk_u, param, profile_nb):
     plt.show()
     return fig, axes
 
-
-def plot_up_down2(rsk_d, rsk_u, param, profile_nb):
+# Better function showing uncertainties, help with chatgpt
+def plot_up_down2(rsk_d, rsk_u, param, profile_nb, save_path=None):
     """
     Plot upcast and downcast profiles with uncertainty bars and styled circular markers.
 
@@ -144,6 +145,7 @@ def plot_up_down2(rsk_d, rsk_u, param, profile_nb):
         rsk_u: RSK object for upcast data.
         param (str): Parameter/channel name to plot.
         profile_nb (int): Profile number to use.
+        save_path: place to save the plots.
 
     Returns:
         (fig, axes): Matplotlib figure and axes.
@@ -223,6 +225,21 @@ def plot_up_down2(rsk_d, rsk_u, param, profile_nb):
     plt.ylabel("Depth")
     plt.grid(True)
     plt.tight_layout()
+    plt.savefig("my_plot.png", dpi=300)
+    
+    # save the plots in files in a choosen save_path location
+    if save_path:        
+        
+        # Create 'figures' folder if it doesn't exist
+        figures_dir = os.path.join(save_path, "figures")
+        os.makedirs(figures_dir, exist_ok=True)  # won't raise error if it already exists
+        
+        # Create a filename based on the parameter name
+        save_filename = os.path.join(figures_dir, f"{param}.png")
+        
+        plt.savefig(save_filename, dpi=150, bbox_inches='tight')
+
+
     plt.show()
 
     return fig, axes

@@ -10,6 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import math
+import pandas as pd
+from datetime import datetime
 
 
 #*****************************************************************************
@@ -287,9 +289,124 @@ def procRSK (path_in, patm, latitude, path_out):
     
 
 
+# ********************************************************************************
+# Function to process a csv file outputted from procRSK custom function
+# It takes in charge up or downward cast depending on user choice
+# It modifies the file to fit to Somlit database file format
+
+
+
+def toSomlitDB (file_path, site_id, output_file):
+    # args: - file_path: str csv file coming from proCRSK function, either down or up cast
+    #       - site_id : 5 for SOMLIT
+    #       - 
+    # output_file: output csv_file
+    #       - 
+    #       - 
+    #       -      
+    
+    
+    with open(file_path, "r") as f:
+        lines = f.readlines()
+    
+    # Step 2: Find the last line starting with '//'
+    header_line_idx = None
+    for idx, line in enumerate(lines):
+        if line.startswith("//"):
+            header_line_idx = idx
+    
+    # Step 3: Read the file into DataFrame, skipping earlier lines
+    # Beware of sep ',   ' 4 spaces after comma
+    df = pd.read_csv(
+        file_path,
+        sep =',    ',
+        skiprows=header_line_idx + 1,     # Skip all lines before actual data
+        header=None ,                      # No header in data part
+        
+    )
+    
+    # Step 4: Set the header from the last '//' line
+    column_names = lines[header_line_idx].lstrip("//").strip().split(",    ")
+    df.columns = column_names
+    
+    # remove line with nan
+    df=df.dropna()
+    
+    # Convert the first column to datetime using your format
+    df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0], format='%Y-%m-%dT%H:%M:%S.%f')
+    
+    # Set the first column as the index
+    df.set_index(df.columns[0], inplace=True)  
+    
+    
+    # Assume df already has datetime index
+    
+    # 1. Extract date and time from index
+    
+    # For date only (no time)
+    df['DATE'] = df.index.strftime('%Y-%m-%d')
+    
+    # For time only, without decimals in seconds
+    df['HEURE'] = df.index.strftime('%H:%M:%S')
+    
+    
+    # 2. Add first column filled with 5
+    df.insert(0, 'ID_SITE', site_id)
+    
+    #Renames columns 
+    df.rename(columns={
+        'temperature(°C)': 'TEMPERATURE',
+        'chlorophyll-a(ug/l)': 'FLUORESCENCE',
+        'par(µMol/m²/s)': 'PAR',
+        'salinity(PSU)':'SALINITE',
+        'depth(m)':'PROFONDEUR'
+    }, inplace=True)
+        
+    
+    # 3. Reorder columns so the first 3 columns are ID_SITE, DATE, HEURE
+    # followed by the rest of the original columns (excluding old index)
+    cols = ['ID_SITE', 'DATE', 'HEURE', 'TEMPERATURE' ,'FLUORESCENCE' ,'PAR', 'SALINITE', 'PROFONDEUR']
+    df = df[cols]
+    
+    
+    # Round to specific decimal numbers per channel for Somlit output file
+    
+    df['TEMPERATURE'] = df['TEMPERATURE'].round(4)
+    df['FLUORESCENCE']=df['FLUORESCENCE'].round(0)
+    df['PAR'] = df['PAR'].round(3)
+    df['SALINITE'] = df['SALINITE'].round(4)
+    df['PROFONDEUR']=df['PROFONDEUR'].round(2)
+    
+    
+    
+    # 4. Prepare your multi-line header as a string
+    header_lines = [
+        "// SOMLIT somlit.fr;;;;;;;",
+        "// RBR processing IUEM;"+datetime.now().strftime('%Y-%m-%d;%H:%M:%S')+";;;;;",# current time of processing
+        "ID_SITE;DATE;HEURE;TEMPERATURE;FLUORESCENCE;PAR;SALINITE;PROFONDEUR",
+        "//;(yyyy-mm-dd);(hh:mm:ss);°C;µg/l;µMol/m²/s;PSU;m",
+        ";;;;;;;",
+    ]
+    
+    # 5. Write the file with the custom header
+    
+    with open(output_file, 'w') as f:
+        # Write custom header lines
+        for line in header_lines:
+            f.write(line + '\n')
+        # Write DataFrame to file with ; separator, no header (already written)
+        df.to_csv(f, sep=';', index=False, header=False)
+
+
+
+
+
+
+
+
   
 '''
-#function that joins
+#function that joins 4 plots, not sure if it works
 def plot_combined(rsk, raw, rsk_d, rsk_u, param, cast, profile_nb):
     # Plot raw and processed data
     fig1, axes1 = raw.plotprofiles(channels=[param], profiles=profile_raw, direction=cast)

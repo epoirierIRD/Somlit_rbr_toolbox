@@ -12,7 +12,13 @@ import os
 import math
 import pandas as pd
 from datetime import datetime
+import glob
+from pathlib import Path
 
+# custom lib
+import sites
+import RSKsomlit_proc as rsksproc
+import RSKsomlit_plt as rsksplt
 
 #*****************************************************************************
 # Processing functions
@@ -83,11 +89,13 @@ def find_profile(rsk):
 # 8,9,10, chloro, fdom, turbidity, order not checked
 
 
-def procRSK (path_in, patm, latitude, path_out):
+def procRSK (path_in, patm, site_id, param, path_out):
     # warning it calls home made find_profile function above
     # args: - path_in: rsk file name with unidentified channels 8,9,10, marked unknown
     #       - patm: atmospheric pressure
-    #       - latitude of the point
+    #       - site_id of the point
+    #       - param: list of parameters you want in destination file ["temperature","chlorophyll-a","par","conductivity"]
+    #       meaning they are the parameters in your source file + calculated ones
     #       - path_out: is the location to store the csv files outputted
     # outputs:
     #       - raw: raw rsk file object that only had the recomputeprofile step done
@@ -102,7 +110,7 @@ def procRSK (path_in, patm, latitude, path_out):
        
         # read the data first
         rsk.readdata()
-        print(rsk)
+        # print(rsk)
         
                 
         # Use atmopsheric pressure patm to calculate sea pressure
@@ -124,10 +132,11 @@ def procRSK (path_in, patm, latitude, path_out):
         # decreasing the treshold depth detects more profiles
         # up to 45 profiles 
         rsk.computeprofiles(0.05,5)
-        print(rsk)
+        # print(rsk)
         
         #identify proper profile number
         profile_nb = find_profile(rsk)
+        print('procrsk profile nb is' + str(profile_nb))
         
         
         # # get the indices for up a- profile_nb you want to choose, good because in a profile there is the up and down.nd down profiles
@@ -155,8 +164,8 @@ def procRSK (path_in, patm, latitude, path_out):
         # this might important in shallow coastal waters just as somlit location
           
         # first derivedepth to calculate depth from corrected sea pressure
-        # latitude of somlit point at Plouzané written below
-        rsk.derivedepth(latitude, seawaterLibrary="TEOS-10")
+        # latitude of somlit point at Plouzané written below, comes from a dictionnary
+        rsk.derivedepth(sites.site_latitudes[site_id], seawaterLibrary="TEOS-10")
         
         # derive velocity , calculate velocity from depth and time
         # possible to add an argument here to do a window average of the salinity
@@ -193,13 +202,20 @@ def procRSK (path_in, patm, latitude, path_out):
         rsk_u = rsk.copy()
         rsk_d = rsk.copy()
         
-       # possible de faire une boucle peut-être ci-dessous
+        # possible de faire une boucle peut-être ci-dessous
+       
+        # choose bin Size here and depth limits for the binning process
+        bin_size = 0.25
+        start_depth = 0.75
+        start_d = start_depth-(bin_size/2)
+        end_d = round(max(rsk_d.data['depth'])/bin_size)*bin_size-bin_size # this parameter must be checked for not loosing data on downcast
          
         # bin average on depth 0.25dbar or 25 cm for DOWN cast
         rsk_d.binaverage(
+            profiles = profile_nb, # we apply the binning only on our profile of interest
             binBy = "depth",
-            binSize = 0.25,
-            boundary = [0.625,12], # parameter to start at 0.75m depth
+            binSize = bin_size,
+            boundary = [start_d,end_d], # parameter to start at 0.75m depth
             # be carefull, choose start depth - binsize/2 to have the value starting the boundary
             direction = "down"
             )
@@ -214,11 +230,12 @@ def procRSK (path_in, patm, latitude, path_out):
             )
         plt.show()
         '''
-        # erreur sur le binning du profil up
+        
         rsk_u.binaverage(
+            profiles = profile_nb, # we apply the binning only on our profile of interest
             binBy = "depth",
-            binSize = 0.25,
-            boundary = [0.625,12],  # parameter to start at 0.75m depth
+            binSize = bin_size,
+            boundary = [start_depth,max(rsk_u.data['depth']).round(0)+start_d],  # parameter to start at 0.75m depth
             # be carefull, choose start depth - binsize/2 to have the value starting the boundary
             direction = "up"
             )
@@ -236,7 +253,7 @@ def procRSK (path_in, patm, latitude, path_out):
         
         
         # Print a list of channels in the rsk file
-        rsk.printchannels()
+        # rsk.printchannels()
         '''
         # Plots
         # Plot de timeseries of processed data, choose parameters on each plot
@@ -258,34 +275,46 @@ def procRSK (path_in, patm, latitude, path_out):
         #    line = ax.get_lines()[-1]
         # plt.show()
         
+        # create a subfolder for this specific rsk file
+        # Extract the base filename without extension
+        base = os.path.splitext(os.path.basename(path_in))[0]
+        file_output_folder = os.path.join(path_out, base)
+        os.makedirs(file_output_folder, exist_ok=True)
+        print('file output folder' + file_output_folder)
+        
+        
         #create new folder for destinations csv files
         # we want to go a directory up from raw data folder
-        newpath_u = path_out+'/upcast' 
-        newpath_d = path_out+'/downcast'
+        newpath_u = file_output_folder+'/upcast' 
+        newpath_d = file_output_folder+'/downcast'
+        
+        print('newpath_u'+newpath_u)
+        
         if not os.path.exists(newpath_u) and not os.path.exists(newpath_d):
             os.makedirs(newpath_u)
             os.makedirs(newpath_d)
         
         # save required variables in a csv with the correct format
         # export down cast
-        rsk_d.RSK2CSV(channels = [
-            "temperature","chlorophyll-a","par","conductivity",
-            "dissolved_o2_concentration","turbidity","salinity",
-            "depth","density_anomaly"], 
+        rsk_d.RSK2CSV(channels = 
+            param, # list of parameters in argument
             profiles=profile_nb,
             comment= "down CAST",
             outputDir=newpath_d)
+        # save export file name down cast because rsk2csv does not output it        
+        csv_d = rsk_to_profile_csv(newpath_d,0)
+        
         # export upcast
-        rsk_u.RSK2CSV(channels = [
-            "temperature","chlorophyll-a","par","conductivity",
-            "dissolved_o2_concentration","turbidity","salinity",
-            "depth","density_anomaly"], 
+        rsk_u.RSK2CSV(channels = 
+            param, 
             profiles=profile_nb,
             comment= "up CAST",
             outputDir=newpath_u)
+        # save export file name down cast because rsk2csv does not output it        
+        csv_u = rsk_to_profile_csv(newpath_u,0)
   
         # #output
-        return raw,rsk,rsk_d,rsk_u, profile_nb
+        return raw,rsk,rsk_d,rsk_u, profile_nb, file_output_folder, csv_d, csv_u
     
 
 
@@ -322,7 +351,7 @@ def toSomlitDB (file_path, site_id, output_file):
         sep =',    ',
         skiprows=header_line_idx + 1,     # Skip all lines before actual data
         header=None ,                      # No header in data part
-        
+        engine = "python"
     )
     
     # Step 4: Set the header from the last '//' line
@@ -335,10 +364,14 @@ def toSomlitDB (file_path, site_id, output_file):
     # Convert the first column to datetime using your format
     df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0], format='%Y-%m-%dT%H:%M:%S.%f')
     
-    # Set the first column as the index
+    # Set the first column as the index, and avoid warning caused
+    # by aving diffrent object types in the index: str, numerical, etc...
+    df[df.columns[0]] = df[df.columns[0]].infer_objects()
     df.set_index(df.columns[0], inplace=True)  
     
-    
+    data = pd.Series([1, '2', 3])  # mixed types
+    index = pd.Index(data.infer_objects())  # ensures inference like before
+
     # Assume df already has datetime index
     
     # 1. Extract date and time from index
@@ -399,6 +432,52 @@ def toSomlitDB (file_path, site_id, output_file):
 
 
 
+def process_rsk_folder(path_in, path_out, site_id, patm, param):
+    os.makedirs(path_out, exist_ok=True)
+
+    rsk_files = glob.glob(os.path.join(path_in, "*.rsk"))
+    print(rsk_files)
+    for input_file in rsk_files:
+        # Extract the base filename without extension
+        base = os.path.splitext(os.path.basename(input_file))[0]
+
+        # Create a subfolder for this file
+        file_output_folder = os.path.join(path_out, base)
+        os.makedirs(file_output_folder, exist_ok=True)
+        
+
+        # Define paths for intermediate and final output
+        #intermediate_csv = os.path.join(file_output_folder, f"{base}_processed.csv")
+        final_csv = os.path.join(file_output_folder, f"{base}_somlit.csv")
+
+        try:
+            print(f"🔄 Processing: {input_file}")
+
+            # Step 1: Convert .rsk to .csv
+            raw,rsk,rsk_d,rsk_u, profile_nb, file_output_folder, csv_d, csv_u = rsksproc.procRSK (input_file, patm, site_id, param, path_out)
+            print('profile_nb ' + str(profile_nb))
+            #Step 2: Plot
+            exclude = ['pressure','sea_pressure','depth']
+            for param in [ x for x in param if x not in exclude] :
+                rsksplt.plot_up_down2(rsk_d, rsk_u, param, profile_nb, file_output_folder)
+
+            # Step 3: Convert to SOMLIT format
+            rsksproc.toSomlitDB(csv_d, site_id, final_csv)
+            
+            
+
+            print(f"✅ Done: Output in {file_output_folder}")
+        except Exception as e:
+            print(f"❌ Failed for {input_file}: {e}")
+
+
+# function to find path of csv file form ProcRSK for somlit2db function
+
+def rsk_to_profile_csv(dir_path, profile_nb=0):
+    dir_path2 = Path(dir_path).parent
+    base_name = dir_path2.name  # Get the last folder name
+    filename = f"{base_name}_profile{profile_nb}.csv"
+    return str(Path(dir_path) / filename)
 
 
 

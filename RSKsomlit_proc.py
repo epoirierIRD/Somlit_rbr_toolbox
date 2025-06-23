@@ -82,18 +82,75 @@ def find_profile(rsk):
     #print(profile)
         
     return profile
-    
+
+from pyrsktools import RSK
+from datetime import datetime
+import os
+
+def split_rsk_by_date(input_rsk_path, output_folder=None):
+    """
+    Splits an RSK file into separate RSK files by date of profile.
+
+    Parameters:
+        input_rsk_path (str): Path to the input .rsk file.
+        output_folder (str): Directory where output files will be saved.
+                             Defaults to the same directory as the input file.
+    """
+    # Load the original RSK file
+    rsk = RSK(input_rsk_path)
+    rsk.open()
+    rsk.readdata()
+
+    # Compute profiles (returns a list of Profile objects)
+    profiles = rsk.computeprofiles()
+
+    # Get unique profile dates
+    dates = [profile.tstart.date() for profile in profiles]
+    unique_dates = sorted(set(dates))
+
+    # Set output folder
+    if output_folder is None:
+        output_folder = os.path.dirname(input_rsk_path)
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Loop through dates and write separate .rsk files
+    for date in unique_dates:
+        date_profiles = [p for p in profiles if p.tstart.date() == date]
+
+        # Create a new RSK file copy and assign filtered profiles
+        new_rsk = RSK(input_rsk_path)
+        new_rsk.open()
+        new_rsk.readdata()
+
+        # Compute all profiles again (necessary for consistent state)
+        _ = new_rsk.computeprofiles()
+
+        # Overwrite the profiles in memory
+        new_rsk._profiles = date_profiles  # using internal attribute
+
+        date_str = date.strftime('%Y%m%d')
+        out_filename = os.path.join(output_folder, f'output_{date_str}.rsk')
+        new_rsk.write(out_filename)
+        print(f"Saved: {out_filename}")
+
+    rsk.close()
+
+
+
+
 
 # ********************************************************************************
 # Fonction to process a correctly rebuilt raw rsk file with all the channels inside, tridente included
 # 8,9,10, chloro, fdom, turbidity, order not checked
 
 
-def procRSK (path_in, patm, site_id, param, path_out):
+def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
     # warning it calls home made find_profile function above
     # args: - path_in: rsk file name with unidentified channels 8,9,10, marked unknown
-    #       - patm: atmospheric pressure
+    #       - patm: atmospheric pressure dBar
     #       - site_id of the point
+    #       - pressure treshold for compute profile function
+    #       - conductivity treshold for compute profile function
     #       - param: list of parameters you want in destination file ["temperature","chlorophyll-a","par","conductivity"]
     #       meaning they are the parameters in your source file + calculated ones
     #       - path_out: is the location to store the csv files outputted
@@ -120,18 +177,20 @@ def procRSK (path_in, patm, site_id, param, path_out):
         # -100hPa = -1dbar = +1m sealevel
         rsk.deriveseapressure(patm)
         
-        # Keep a copy of the raw data to compare with the processed ones
-        raw = rsk.computeprofiles(0.05,5)
-        
         # Correct for A2D (analog to digital) zero-holder, find the missing samples and interpolate
         rsk.correcthold(action = "interp")
         
         # # computing profiles
+        # Keep a copy of the raw data to compare with the processed ones
+        # the parameters below are adapted for very shallow profile like somlit
+        # with acclimatation time
+        #-----
         # # args pressure treshold and conductivity treshold
         # # works fine to detect 2 profiles, 2downcast, 2upcast and 2 profiles in rsk.regions
         # decreasing the treshold depth detects more profiles
         # up to 45 profiles 
-        rsk.computeprofiles(0.05,5)
+        
+        raw = rsk.computeprofiles(p_tresh,c_tresh)
         # print(rsk)
         
         #identify proper profile number
@@ -322,9 +381,6 @@ def procRSK (path_in, patm, site_id, param, path_out):
 # Function to process a csv file outputted from procRSK custom function
 # It takes in charge up or downward cast depending on user choice
 # It modifies the file to fit to Somlit database file format
-
-
-
 def toSomlitDB (file_path, site_id, output_file):
     # args: - file_path: str csv file coming from proCRSK function, either down or up cast
     #       - site_id : 5 for SOMLIT
@@ -432,7 +488,7 @@ def toSomlitDB (file_path, site_id, output_file):
 
 
 
-def process_rsk_folder(path_in, path_out, site_id, patm, param):
+def process_rsk_folder(path_in, path_out, site_id, p_tresh, c_tresh, patm, param):
     os.makedirs(path_out, exist_ok=True)
 
     rsk_files = glob.glob(os.path.join(path_in, "*.rsk"))
@@ -448,13 +504,19 @@ def process_rsk_folder(path_in, path_out, site_id, patm, param):
 
         # Define paths for intermediate and final output
         #intermediate_csv = os.path.join(file_output_folder, f"{base}_processed.csv")
-        final_csv = os.path.join(file_output_folder, f"{base}_somlit.csv")
-
+        final_csv_d = os.path.join(file_output_folder+'/downcast', f"{base}_4somlit_d.csv")
+        final_csv_u = os.path.join(file_output_folder+'/upcast', f"{base}_4somlit_u.csv")
         try:
             print(f"🔄 Processing: {input_file}")
 
             # Step 1: Convert .rsk to .csv
-            raw,rsk,rsk_d,rsk_u, profile_nb, file_output_folder, csv_d, csv_u = rsksproc.procRSK (input_file, patm, site_id, param, path_out)
+            raw,rsk,rsk_d,rsk_u, profile_nb, file_output_folder, csv_d, csv_u = rsksproc.procRSK (input_file,
+                                                                                                  patm,
+                                                                                                  site_id,
+                                                                                                  p_tresh,
+                                                                                                  c_tresh,
+                                                                                                  param,
+                                                                                                  path_out)
             print('profile_nb ' + str(profile_nb))
             #Step 2: Plot
             exclude = ['pressure','sea_pressure','depth']
@@ -462,9 +524,8 @@ def process_rsk_folder(path_in, path_out, site_id, patm, param):
                 rsksplt.plot_up_down2(rsk_d, rsk_u, param, profile_nb, file_output_folder)
 
             # Step 3: Convert to SOMLIT format
-            rsksproc.toSomlitDB(csv_d, site_id, final_csv)
-            
-            
+            rsksproc.toSomlitDB(csv_d, site_id, final_csv_d)
+            rsksproc.toSomlitDB(csv_u, site_id, final_csv_u)
 
             print(f"✅ Done: Output in {file_output_folder}")
         except Exception as e:
@@ -482,44 +543,6 @@ def rsk_to_profile_csv(dir_path, profile_nb=0):
 
 
 
-
-  
-'''
-#function that joins 4 plots, not sure if it works
-def plot_combined(rsk, raw, rsk_d, rsk_u, param, cast, profile_nb):
-    # Plot raw and processed data
-    fig1, axes1 = raw.plotprofiles(channels=[param], profiles=profile_raw, direction=cast)
-    fig2, axes2 = rsk.plotprofiles(channels=[param], profiles=profile_proc, direction=cast)
-    
-    # Plot upcast and downcast data
-    fig3, axes3 = rsk_d.plotprofiles(channels=[param], profiles=profile_nb, direction='down')
-    fig4, axes4 = rsk_u.plotprofiles(channels=[param], profiles=profile_nb, direction='up')
-    
-    # Merge all four plots
-    fig, axes = rsk.mergeplots(
-        [fig1, axes1],
-        [fig2, axes2],
-        [fig3, axes3],
-        [fig4, axes4]
-    )
-    
-    # Customize appearance
-    for ax in axes:
-        lines = ax.get_lines()
-        
-        # Style raw vs processed data
-        plt.setp(lines[0], linewidth=0.5, marker="o", markerfacecolor="w", label="Original data")
-        plt.setp(lines[1], linewidth=0.5, marker="o", markerfacecolor="w", label="Processed data")
-        
-        # Style upcast vs downcast
-        if len(lines) > 2:
-            plt.setp(lines[2], linewidth=0.5, linestyle='--', dashes=[10, 5], label="Down_cast")
-            plt.setp(lines[3], linewidth=0.5, linestyle='--', dashes=[10, 5], label="Up_cast")
-    
-    plt.legend()
-    plt.title(f"{cast}_{param}")
-    plt.show() 
-'''
 
 
 

@@ -225,7 +225,7 @@ def plot_up_down2(rsk_d, rsk_u, param, profile_nb, save_path=None):
     plt.ylabel("Depth")
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig("my_plot.png", dpi=300)
+    # plt.savefig("my_plot.png", dpi=300)
     
     # save the plots in files in a choosen save_path location
     if save_path:        

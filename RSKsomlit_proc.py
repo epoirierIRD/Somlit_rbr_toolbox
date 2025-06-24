@@ -486,50 +486,66 @@ def toSomlitDB (file_path, site_id, output_file):
         # Write DataFrame to file with ; separator, no header (already written)
         df.to_csv(f, sep=';', index=False, header=False)
 
+# function to procees a list of files in a chosen folder
+# issue at the moment, it works only for the last file I think,
+# the loop does not properly work certainly because of the variable of the profle_nb that does not update in the loop.
 
-
-def process_rsk_folder(path_in, path_out, site_id, p_tresh, c_tresh, patm, param):
+def process_rsk_folder(path_in, site_id, p_tresh, c_tresh, patm, param):
+    
+    # assuming the rsk files are in a rawdatafolder, we want to store the processes_data in a proc_data dir
+    # get the dir a step up
+    parent_dir = os.path.dirname(path_in)
+    path_out = os.path.join(parent_dir, "procdata")
+    # creates the path_out directory woth proc_data if it don't already exists
     os.makedirs(path_out, exist_ok=True)
 
     rsk_files = glob.glob(os.path.join(path_in, "*.rsk"))
     print(rsk_files)
     for input_file in rsk_files:
-        # Extract the base filename without extension
-        base = os.path.splitext(os.path.basename(input_file))[0]
+       rsksproc.process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param)
+            
+# function to do the processing on a single rsk file only.
+# it is the same as process_rsk_folder but applied for one file only
 
-        # Create a subfolder for this file
-        file_output_folder = os.path.join(path_out, base)
-        os.makedirs(file_output_folder, exist_ok=True)
-        
+def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param):
+    
+    # Extract the base filename without extension
+    base = os.path.splitext(os.path.basename(input_file))[0]
 
-        # Define paths for intermediate and final output
-        #intermediate_csv = os.path.join(file_output_folder, f"{base}_processed.csv")
-        final_csv_d = os.path.join(file_output_folder+'/downcast', f"{base}_4somlit_d.csv")
-        final_csv_u = os.path.join(file_output_folder+'/upcast', f"{base}_4somlit_u.csv")
-        try:
-            print(f"🔄 Processing: {input_file}")
+    # Create a subfolder for this file
+    file_output_folder = os.path.join(path_out, base)
+    os.makedirs(file_output_folder, exist_ok=True)
+    
 
-            # Step 1: Convert .rsk to .csv
-            raw,rsk,rsk_d,rsk_u, profile_nb, file_output_folder, csv_d, csv_u = rsksproc.procRSK (input_file,
-                                                                                                  patm,
-                                                                                                  site_id,
-                                                                                                  p_tresh,
-                                                                                                  c_tresh,
-                                                                                                  param,
-                                                                                                  path_out)
-            print('profile_nb ' + str(profile_nb))
-            #Step 2: Plot
-            exclude = ['pressure','sea_pressure','depth']
-            for param in [ x for x in param if x not in exclude] :
-                rsksplt.plot_up_down2(rsk_d, rsk_u, param, profile_nb, file_output_folder)
+    # Define paths for intermediate and final output
+    #intermediate_csv = os.path.join(file_output_folder, f"{base}_processed.csv")
+    final_csv_d = os.path.join(file_output_folder+'/downcast', f"{base}_4somlit_d.csv")
+    final_csv_u = os.path.join(file_output_folder+'/upcast', f"{base}_4somlit_u.csv")
+    try:
+        print(f"🔄 Processing: {input_file}")
 
-            # Step 3: Convert to SOMLIT format
-            rsksproc.toSomlitDB(csv_d, site_id, final_csv_d)
-            rsksproc.toSomlitDB(csv_u, site_id, final_csv_u)
+        # Step 1: Convert .rsk to .csv
+        raw,rsk,rsk_d,rsk_u, profile_nb, file_output_folder, csv_d, csv_u = rsksproc.procRSK (input_file,
+                                                                                              patm,
+                                                                                              site_id,
+                                                                                              p_tresh,
+                                                                                              c_tresh,
+                                                                                              param,
+                                                                                              path_out)
+        print('profile_nb ' + str(profile_nb))
+        #Step 2: Plot
+        exclude = ['pressure','sea_pressure','depth']
+        for param in [ x for x in param if x not in exclude] :
+            rsksplt.plot_up_down2(rsk_d, rsk_u, param, profile_nb, file_output_folder)
 
-            print(f"✅ Done: Output in {file_output_folder}")
-        except Exception as e:
-            print(f"❌ Failed for {input_file}: {e}")
+        # Step 3: Convert to SOMLIT format
+        rsksproc.toSomlitDB(csv_d, site_id, final_csv_d)
+        rsksproc.toSomlitDB(csv_u, site_id, final_csv_u)
+
+        print(f"✅ Done: Output in {file_output_folder}")
+    except Exception as e:
+        print(f"❌ Failed for {input_file}: {e}")
+    
 
 
 # function to find path of csv file form ProcRSK for somlit2db function

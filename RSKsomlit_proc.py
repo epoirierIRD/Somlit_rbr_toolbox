@@ -23,9 +23,9 @@ import RSKsomlit_plt as rsksplt
 #*****************************************************************************
 # Processing functions
 
-# The function below find the profiles number based on the highest sea-pressure 
+# The function below finds the profiles number based on the highest sea-pressure 
 # difference in downcast. This to filter the fake profiles due to swell or sensor 
-# acclimatation
+# acclimatation in the beginning of somlit
 
 def find_profile(rsk):
     # args:
@@ -142,6 +142,8 @@ def split_rsk_by_date(input_rsk_path, output_folder=None):
 # ********************************************************************************
 # Fonction to process a correctly rebuilt raw rsk file with all the channels inside, tridente included
 # 8,9,10, chloro, fdom, turbidity, order not checked
+# function can only output the profile_nb for one somlit experiment and not several ones on 
+# different days that are stored in the same rsk file
 
 
 def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
@@ -489,7 +491,6 @@ def toSomlitDB (file_path, site_id, output_file):
 # function to procees a list of files in a chosen folder
 # issue at the moment, it works only for the last file I think,
 # the loop does not properly work certainly because of the variable of the profle_nb that does not update in the loop.
-
 def process_rsk_folder(path_in, site_id, p_tresh, c_tresh, patm, param):
     
     # assuming the rsk files are in a rawdatafolder, we want to store the processes_data in a proc_data dir
@@ -506,7 +507,7 @@ def process_rsk_folder(path_in, site_id, p_tresh, c_tresh, patm, param):
             
 # function to do the processing on a single rsk file only.
 # it is the same as process_rsk_folder but applied for one file only
-
+# it creates the figures and csv in a folder nammed after the file name
 def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param):
     
     # Extract the base filename without extension
@@ -547,9 +548,7 @@ def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, para
         print(f"❌ Failed for {input_file}: {e}")
     
 
-
 # function to find path of csv file form ProcRSK for somlit2db function
-
 def rsk_to_profile_csv(dir_path, profile_nb=0):
     dir_path2 = Path(dir_path).parent
     base_name = dir_path2.name  # Get the last folder name

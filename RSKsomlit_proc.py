@@ -110,8 +110,13 @@ def has_multiple_days_and_dates(rsk_file):
 
 # function to scan the rsk files in my folder 
 # split by date if I have a multiple rsk 
-# output th list of files in my directory at the end
+# output the list of files rsk kept for next processing step 
 def scan_rsk(path_in):
+    
+    
+    remove_rsk_date_files(path_in) # to clear the folder with the previous _YYYYMMDD rsk files
+    
+    
     rsk_files = glob.glob(os.path.join(path_in, "*.rsk")) # creates the list of rsk files originals with path
     file_names = [os.path.basename(path) for path in rsk_files] # list of file names only
     print('Scanning RSK files, checking for multiple dates in files:')
@@ -122,7 +127,7 @@ def scan_rsk(path_in):
     final_files = []
     final_dates = []
     
-    for i, input_file in enumerate(rsk_files): # loop on my list of files
+    for i, input_file in enumerate(rsk_files): # loop on my list of files, input file is a rsk file
         is_multiple, dates = rsksproc.has_multiple_days_and_dates(input_file)
         # to create alist of final_dates
         print('found these dates in the files:',input_file)
@@ -143,21 +148,34 @@ def scan_rsk(path_in):
             # split the rsk if it is multiple, unique_days is a list of dates
             created_files = rsksproc.split_rsk_by_day(input_file) 
           
-            print(f"✅ Created RSK files: {created_files}")
-            final_files.extend(created_files) # add the created files in the list
+            # print(f"✅ Created RSK files: {created_files}")
+            # final_files.extend(created_files) # add the created files in the list
+            
         else: # when no muyliple date
         # we have to rename _YYYYmmdd when our file is not duplicate
         # this is for the routine find duplicate
-            dt = np.datetime64(dates[0])
-            date_str = str(dt).replace('-', '')
-            rename_rsk_with_date(input_file, date_str)
-            final_files.append(input_file) 
+            
+            # Construct filename
+            day = np.datetime64(dates[0])
+            day_str = str(day).replace('-', '')
+            #filename = f"split_{day_str}.rsk"
+        
+            # Save the new RSK file
+            with pyrsk.RSK(input_file) as rsk:
+                 rsk.readdata()
+                 output_file = rsk.RSK2RSK(suffix=day_str)  # Writes the new rsk file to keep the original one
+                 created_files.append(output_file)
+            
+            # dt = np.datetime64(dates[0])
+            # date_str = str(dt).replace('-', '')
+            # rename_rsk_with_date(input_file, date_str)
+            # final_files.append(input_file) 
             
     final_files_names = [os.path.basename(path) for path in final_files]
     
     final_dates.sort(key=lambda d: datetime.strptime(d, "%Y-%m-%d")) # sort dates chronological
     
-    print('Identified SOMLIT dates:')
+    print('Identified SOMLIT dates in the group of files to process:')
     for date in final_dates:
         print(date)
     
@@ -174,32 +192,38 @@ def scan_rsk(path_in):
     print('Deleted files because duplicated')
     for f in sorted_deleted:
         print(f" - {os.path.basename(f)}")
-        
-def rename_rsk_with_date(file_path, date_str):
-    """
-    Rename an .rsk file by appending _YYYYMMDD before the extension.
+    
+    return sorted_kept
 
-    Parameters:
-        file_path (str): Full path to the original .rsk file.
-        date_str (str): Date string in format 'YYYYMMDD'.
 
-    Returns:
-        str: New full path after renaming.
-    """
-    if not file_path.endswith('.rsk'):
-        raise ValueError("File must have a .rsk extension")
+#unused function below, to rename a rsk file with a date _ at the end
+# def rename_rsk_with_date(file_path, date_str):
+#     """
+#     Rename an .rsk file by appending _YYYYMMDD before the extension.
 
-    dir_path = os.path.dirname(file_path)
-    base_name = os.path.basename(file_path)
-    name_without_ext = os.path.splitext(base_name)[0]
+#     Parameters:
+#         file_path (str): Full path to the original .rsk file.
+#         date_str (str): Date string in format 'YYYYMMDD'.
 
-    new_name = f"{name_without_ext}_{date_str}.rsk"
-    new_path = os.path.join(dir_path, new_name)
+#     Returns:
+#         str: New full path after renaming.
+#     """
+#     if not file_path.endswith('.rsk'):
+#         raise ValueError("File must have a .rsk extension")
 
-    os.rename(file_path, new_path)
-    print(f"✅ Renamed to: {new_name}")
-    return new_path
-        
+#     dir_path = os.path.dirname(file_path)
+#     base_name = os.path.basename(file_path)
+#     name_without_ext = os.path.splitext(base_name)[0]
+
+#     new_name = f"{name_without_ext}_{date_str}.rsk"
+#     new_path = os.path.join(dir_path, new_name)
+
+#     os.rename(file_path, new_path)
+#     print(f"✅ Renamed to: {new_name}")
+#     return new_path
+
+
+  # ***************************************************************************      
 # function to remove the duplicates for one date
 # output the files deleted and the files kept
 def remove_duplicates(path_in):
@@ -288,7 +312,7 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
        
         # read the data first
         rsk.readdata()
-        # print(rsk)
+        # print(rsk.regions)
         
 
         
@@ -299,8 +323,7 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         # -100hPa = -1dbar = +1m sealevel
         rsk.deriveseapressure(patm)
         
-        # Correct for A2D (analog to digital) zero-holder, find the missing samples and interpolate
-        rsk.correcthold(action = "interp")
+        
         
         # # computing profiles
         # Keep a copy of the raw data to compare with the processed ones
@@ -314,6 +337,11 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         
         raw = rsk.computeprofiles(p_tresh,c_tresh)
         # print(rsk)
+        
+        
+        # Correct for A2D (analog to digital) zero-holder, find the missing samples and interpolate
+        rsk.correcthold(action = "interp")
+        
         
         #identify proper profile number
         profile_nb = find_profile(rsk)
@@ -502,9 +530,10 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         
 # ****************************************************************************************************************
 # function to procees a list of files in a chosen folder
-# issue at the moment, it works only for the last file I think,
+# list of correct rsk files to process is given in argument
 # the loop does not properly work certainly because of the variable of the profle_nb that does not update in the loop.
-def process_rsk_folder(path_in, site_id, p_tresh, c_tresh, patm, param):
+def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, param):
+    
     
     # assuming the rsk files are in a rawdatafolder, we want to store the processes_data in a proc_data dir
     # get the dir a step up
@@ -512,23 +541,34 @@ def process_rsk_folder(path_in, site_id, p_tresh, c_tresh, patm, param):
     path_out = os.path.join(parent_dir, "procdata")
     # creates the path_out directory woth proc_data if it don't already exists
     os.makedirs(path_out, exist_ok=True)
-
-    rsk_files = glob.glob(os.path.join(path_in, "*.rsk"))
-    print(rsk_files)
     
-    for i, input_file in enumerate(rsk_files):
-        print(f"\n--- Processing file {i+1}/{len(rsk_files)}: {input_file} ---")
+    # Extract just the filenames from the list
+    rsk_filenames_from_list = {os.path.basename(path) for path in list_of_rsk}
+    # List of all rsk files in target directory
+    all_files_in_dir = os.listdir(path_in)
+    # finding the matching rsk files between two lists
+    valid_files_to_process = [
+        os.path.join(path_in, f)
+        for f in all_files_in_dir
+        if f in rsk_filenames_from_list
+        ]
+
+    # rsk_files = glob.glob(os.path.join(path_in, "*.rsk"))
+    print ('List of file to process with process_rsk_folder func:')
+    for f in valid_files_to_process:
+        print(f" - {os.path.basename(f)}")# show the list of files to process
+    
+    for i, input_file in enumerate(valid_files_to_process):
+        print(f"\n--- Processing file {i+1}/{len(valid_files_to_process)}: {input_file} ---")
         rsksproc.process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param)
     
-    for input_file in rsk_files:
-       rsksproc.process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param)
-       
        
 # *****************************************************************************************************************           
 # function to do the processing on a single rsk file only.
 # it is the same as process_rsk_folder but applied for one file only
 # it creates the figures and csv in a folder nammed after the file name
 def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param):
+    
     
     # Extract the base filename without extension
     base = os.path.splitext(os.path.basename(input_file))[0]
@@ -730,8 +770,25 @@ def toSomlitDB (file_path, site_id, output_file):
             f.write(line + '\n')
         # Write DataFrame to file with ; separator, no header (already written)
         df.to_csv(f, sep=';', index=False, header=False)
-        
 
+
+
+# ****************************************************************************      
+# function to clear the _YYYYMMDD.rsk files
+def remove_rsk_date_files(folder):
+    
+    # Regex pattern for _YYYYMMDD.rsk
+    pattern = re.compile(r'^.*_\d{8}\.rsk$')
+    
+    # Loop over files in folder
+    for filename in os.listdir(folder):
+        if pattern.match(filename):
+            filepath = os.path.join(folder, filename)
+            try:
+                os.remove(filepath)
+                print(f"Deleted: {filepath}")
+            except Exception as e:
+                print(f"❌ Failed to delete {filepath}: {e}")
 
 
 

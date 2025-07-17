@@ -16,6 +16,7 @@ import glob
 from pathlib import Path
 from collections import defaultdict
 import re
+import sys
 
 # custom lib
 import sites
@@ -26,8 +27,8 @@ import RSKsomlit_plt as rsksplt
 # Processing functions
 # ****************************************************************************
 # The function find_profile finds the profiles number for one rsk file with one profile
-# based on the highest sea-pressure 
-# difference in downcast. This to filter the fake profiles due to swell or sensor 
+# based on the highest sea-pressure difference in downcast. 
+# This to filter the fake profiles due to swell or sensor 
 # acclimatation in the beginning of somlit
 
 def find_profile(rsk):
@@ -108,14 +109,14 @@ def has_multiple_days_and_dates(rsk_file):
     
     return len(unique_dates) > 1, unique_dates
 
+
+# ******************************************************************************
 # function to scan the rsk files in my folder 
 # split by date if I have a multiple rsk 
 # output the list of files rsk kept for next processing step 
 def scan_rsk(path_in):
     
-    
     remove_rsk_date_files(path_in) # to clear the folder with the previous _YYYYMMDD rsk files
-    
     
     rsk_files = glob.glob(os.path.join(path_in, "*.rsk")) # creates the list of rsk files originals with path
     file_names = [os.path.basename(path) for path in rsk_files] # list of file names only
@@ -223,7 +224,7 @@ def scan_rsk(path_in):
 #     return new_path
 
 
-  # ***************************************************************************      
+# ***************************************************************************      
 # function to remove the duplicates for one date
 # output the files deleted and the files kept
 def remove_duplicates(path_in):
@@ -270,7 +271,9 @@ def remove_duplicates(path_in):
 
     return {"kept": kept, "deleted": deleted}
 
-# function to sort the fils _YYYYMMDD chronologically
+
+# *****************************************************************************
+# function to sort the files _YYYYMMDD chronologically
 def sort_files_by_yymmdd(files):
     def extract_date(f):
         fname = os.path.basename(f)
@@ -312,7 +315,7 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
        
         # read the data first
         rsk.readdata()
-        # print(rsk.regions)
+        
         
 
         
@@ -336,7 +339,7 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         # up to 45 profiles 
         
         raw = rsk.computeprofiles(p_tresh,c_tresh)
-        # print(rsk)
+       
         
         
         # Correct for A2D (analog to digital) zero-holder, find the missing samples and interpolate
@@ -554,11 +557,12 @@ def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, pa
         ]
 
     # rsk_files = glob.glob(os.path.join(path_in, "*.rsk"))
-    print ('List of file to process with process_rsk_folder func:')
-    for f in valid_files_to_process:
+    print ('🔄 List of files to be processed:')
+    valid_sorted=sort_files_by_yymmdd(valid_files_to_process)# sort by increasinf date
+    for f in valid_sorted:
         print(f" - {os.path.basename(f)}")# show the list of files to process
     
-    for i, input_file in enumerate(valid_files_to_process):
+    for i, input_file in enumerate(valid_sorted):
         print(f"\n--- Processing file {i+1}/{len(valid_files_to_process)}: {input_file} ---")
         rsksproc.process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param)
     
@@ -569,9 +573,18 @@ def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, pa
 # it creates the figures and csv in a folder nammed after the file name
 def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param):
     
+    name = os.path.basename(input_file)
+    
+    # # ask somlit number to user
+    # print(f"\n🔄 Processing file: {name}")
+    # sys.stdout.flush()  # <-- force flush the print buffer
+    # somlit_number = input(f"Enter SOMLIT number for '{name}': ")
+
     
     # Extract the base filename without extension
     base = os.path.splitext(os.path.basename(input_file))[0]
+    
+    
 
     # Create a subfolder for this file
     file_output_folder = os.path.join(path_out, base)
@@ -611,6 +624,9 @@ def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, para
         print(f"✅ Done: Output in {file_output_folder}")
     except Exception as e:
         print(f"❌ Failed for {input_file}: {e}")
+        
+    #return somlit_number
+        
 
 
 #***************************************************************************************

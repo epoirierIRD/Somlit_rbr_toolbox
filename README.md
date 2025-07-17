@@ -22,6 +22,10 @@ It has been developped at the European Institute for Marine Studies (IUEM), Plou
 - **sites.py** is the list of SOMLIT sites with corresponding Lat, Lon used in the processing
 - **main.py** is the main python script to run to process the list of .rsk files located in the raw_rsk_files folder
 - **raw_rsk_files** is a folder containing raw rsk files to process. They have logged during the summer 2024 at the SOMLIT point of Plouzané by the SOMLIT team of IUEM
+- **environment.yml** is the file containing all packages and dependencies of the conda environment used to develop the code. It hase been created with command:
+    ```bash
+    conda env export > environment.yml
+    ```
 
 ## Features
 

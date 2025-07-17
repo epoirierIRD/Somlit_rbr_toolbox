@@ -14,6 +14,15 @@ The functions are based on [pyRSKtools](https://docs-static.rbr-global.com/pyrsk
 
 It has been developped at the European Institute for Marine Studies (IUEM), Plouzané, France. It is open-source to encourage colleagues from oceanographic research laboratories use it and contribute.
 
+## Contents
+
+- **RSKsomlit_plt.py**: contains plotting functions only
+- **RSKsomlit_proc.py**: contains processing functions only
+- **sensor_uncertainties.py** is a ressource file containing the sensor uncertainties for each channel used to show the error bars in the plots
+- **sites.py** is the list of SOMLIT sites with corresponding Lat, Lon used in the processing
+- **main.py** is the main python script to run to process the list of .rsk files located in the raw_rsk_files folder
+- **raw_rsk_files** is a folder containing raw rsk files to process. They have logged during the summer 2024 at the SOMLIT point of Plouzané by the SOMLIT team of IUEM
+
 ## Features
 
 - Reads a list of raw .rsk files in a folder:
@@ -32,8 +41,8 @@ It has been developped at the European Institute for Marine Studies (IUEM), Plou
 ## Functionality
 
 - The code is based on pyRSKtools open source RBR python library to process the data
-- Custom functions have been developped to avoid opening Ruskin and reduce clicks when handling the .rsk files and detecting the SOMLIT days and profiles
-- Plots are to help the user choose between the down or the upcast which to save in the SOMLIT DB.
+- Custom functions have been developped to avoid opening Ruskin and reduce clicks when handling the .rsk files and detecting the SOMLIT days and profiles. 
+- Plots are to help the user choose between the down or the upcast which to save in the SOMLIT DB. 
 
 ## Using the code
 
@@ -55,10 +64,15 @@ It has been developped at the European Institute for Marine Studies (IUEM), Plou
     ```
 You can rename the environement at this setp.
 
-5. Run the program 
+5. Update the **main.py** file with the correct path where you have stored the repository
+
+6. Run the program 
     ```bash
     python main.py
     ```
+7. A folder is created under your_path/Somlit_rbr_toolbox/procdata
+containing the outputs for all the .rsk files processed. They are stored in one
+folder for each daily file.
 
 ## Avenues for Improvement
 

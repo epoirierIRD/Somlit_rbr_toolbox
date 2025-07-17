@@ -2,8 +2,8 @@
   <img src="images/logo_IUEM.png" alt="IUEM Logo" width="500"/>
 </p>
 
-# SOMLIT RBR toolbox
-
+# SOMLIT RBR toolbox      
+*![Last Commit](https://img.shields.io/github/last-commit/epoirierIRD/Somlit_rbr_toolbox)*
 ## Description
 
 This GitHub repository holds python functions to process RBR Maestro CTD data collected at SOMLIT observatory in Plouzané, France. It can be adapted to other SOMLIT sites.

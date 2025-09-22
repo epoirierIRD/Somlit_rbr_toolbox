@@ -59,6 +59,7 @@ It has been developped at the European Institute for Marine Studies (IUEM), Plou
    git clone https://github.com/epoirierIRD/Somlit_rbr_toolbox.git
    ```
 3. Create the conda environment from the provided environment.yml file provided. This file contains all packages and dependencies you need to run the code.
+**Be aware the pyrsktools pacakge is not in the .yml and must be installed via pip install.**   
     ```bash
     conda env create -f environment.yml
     ```

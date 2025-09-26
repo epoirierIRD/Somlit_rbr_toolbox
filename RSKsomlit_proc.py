@@ -26,6 +26,81 @@ import RSKsomlit_plt as rsksplt
 #*****************************************************************************
 # Processing functions
 # ****************************************************************************
+
+#The function export_profiles3rsk takes one single rsk file
+# with several profiles in it and split it in one rsk file for each profile
+def export_profiles2rsk(inp_file, output_dir="."):
+    """
+    Split an RSK file into one RSK file per PROFILE region, preserving metadata.
+    Automatically deletes existing files with the same name when running the script
+
+    Parameters
+    ----------
+    inp_file : str
+        Path to the input .rsk file.
+    output_dir : str, optional
+        Directory where the profile RSK files will be saved.
+        Defaults to the directory up ".".
+        
+    export the liste of files created
+    """
+    #get the rsk file dir
+    file_dir = os.path.dirname(os.path.abspath(inp_file))
+    
+    # base name without extension of rsk file
+    base_name = os.path.splitext(os.path.basename(inp_file))[0]
+
+    with pyrsk.RSK(inp_file) as rsk:  # metadata loaded
+
+        # Try to get RegionProfile class
+        try:
+            from pyrsktools.datatypes import RegionProfile
+            profiles = rsk.getregionsbytypes(RegionProfile)
+        except Exception:
+            profiles = [
+                reg for reg in rsk.regions
+                if getattr(reg, "type", "").upper() == "PROFILE"
+                   or reg.__class__.__name__ == "RegionProfile"
+            ]
+    
+        if not profiles:
+            rsk.readdata()
+            rsk.computeprofiles()
+            profiles = [reg for reg in rsk.regions if getattr(reg, "type", "").upper() == "PROFILE"]
+    
+        if not profiles:
+            raise RuntimeError("No PROFILE regions found in this file.")
+    
+        outputs = []
+        for i, prof in enumerate(profiles):
+            t1, t2 = prof.tstamp1, prof.tstamp2
+    
+            new = rsk.copy()
+            new.readdata(t1, t2)
+            new.computeprofiles()
+    
+            # safe filename suffix
+            t1s = np.datetime_as_string(t1, unit="s").replace(":", "-")
+            t2s = np.datetime_as_string(t2, unit="s").replace(":", "-")
+    
+            # include original file base name
+            suffix = f"{base_name}_profile_{i}_{t1s}_to_{t2s}"
+            outname = os.path.join(output_dir, f"{suffix}.rsk")
+            
+            #print(outname)
+            # delete if file already exists
+            if os.path.exists(outname):
+                os.remove(outname)
+                print("Deleted existing file:", outname)
+    
+            # export
+            new.RSK2RSK(outputDir=output_dir, suffix=f"profile_{i}_{t1s}_to_{t2s}")
+            outputs.append(outname)
+            print("Wrote:", outname)
+
+    return outputs
+
+
 # The function find_profile finds the profiles number for one rsk file with one profile
 # based on the highest sea-pressure difference in downcast. 
 # This to filter the fake profiles due to swell or sensor 
@@ -152,7 +227,7 @@ def scan_rsk(path_in):
             # print(f"✅ Created RSK files: {created_files}")
             # final_files.extend(created_files) # add the created files in the list
             
-        else: # when no muyliple date
+        else: # when no multiple date
         # we have to rename _YYYYmmdd when our file is not duplicate
         # this is for the routine find duplicate
             
@@ -290,6 +365,8 @@ def sort_files_by_yymmdd(files):
 # ********************************************************************************
 # Fonction to process a correctly rebuilt raw rsk file with all the channels inside, tridente included
 # 8,9,10, chloro, fdom, turbidity, order not checked
+# It seems that reading the rsk files with this library reads correctly the Tridente channels
+# No need to produce a rebuilt file
 # function can only output the profile_nb for one somlit experiment and not several ones on 
 # different days that are stored in the same rsk file
 def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):

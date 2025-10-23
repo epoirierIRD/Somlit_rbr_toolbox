@@ -106,8 +106,8 @@ Follow this procedure contribute:
 ## Contributors
 
 IUEM:
-- Emilie Grossteffan
 - Etienne Poirier
+- Emilie Grossteffan
 - Peggy Rimmelin-Maury
 
 ## License

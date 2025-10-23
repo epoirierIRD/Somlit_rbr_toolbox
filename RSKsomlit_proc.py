@@ -23,11 +23,12 @@ import sites
 import RSKsomlit_proc as rsksproc
 import RSKsomlit_plt as rsksplt
 
-#*****************************************************************************
-# Processing functions
-# ****************************************************************************
 
-#The function export_profiles3rsk takes one single rsk file
+# %% Many processing functions below
+# Main one is procRSK
+# Sorted by alphabetic order (intention)
+# %%
+#The function export_profiles2rsk takes one single rsk file
 # with several profiles in it and split it in one rsk file for each profile
 def export_profiles2rsk(inp_file, output_dir="."):
     """
@@ -100,7 +101,7 @@ def export_profiles2rsk(inp_file, output_dir="."):
 
     return outputs
 
-
+# %%
 # The function find_profile finds the profiles number for one rsk file with one profile
 # based on the highest sea-pressure difference in downcast. 
 # This to filter the fake profiles due to swell or sensor 
@@ -162,7 +163,7 @@ def find_profile(rsk):
         
     return profile
 
-#********************************************************************************
+# %%
 # check if one single rsk_file has multiple dates or not 
 # outputs a boolean and the list of the dates even if one date only
 # works ok
@@ -185,7 +186,7 @@ def has_multiple_days_and_dates(rsk_file):
     return len(unique_dates) > 1, unique_dates
 
 
-# ******************************************************************************
+# %%
 # function to scan the rsk files in my folder 
 # split by date if I have a multiple rsk 
 # output the list of files rsk kept for next processing step 
@@ -362,20 +363,17 @@ def sort_files_by_yymmdd(files):
 
 
 
-# ********************************************************************************
+# %%
 # Fonction to process a correctly rebuilt raw rsk file with all the channels inside, tridente included
-# 8,9,10, chloro, fdom, turbidity, order not checked
-# It seems that reading the rsk files with this library reads correctly the Tridente channels
-# No need to produce a rebuilt file
 # function can only output the profile_nb for one somlit experiment and not several ones on 
 # different days that are stored in the same rsk file
 def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
     # warning it calls home made find_profile function above
     # args: - path_in: rsk file name with unidentified channels 8,9,10, marked unknown
     #       - patm: atmospheric pressure dBar
-    #       - site_id of the point
-    #       - pressure treshold for compute profile function
-    #       - conductivity treshold for compute profile function
+    #       - site_id: of the point
+    #       - p_tresh: pressure treshold for compute profile function
+    #       - c_tresh: conductivity treshold for compute profile function
     #       - param: list of parameters you want in destination file ["temperature","chlorophyll-a","par","conductivity"]
     #       meaning they are the parameters in your source file + calculated ones
     #       - path_out: is the location to store the csv files outputted
@@ -385,73 +383,88 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
     #       - rsk_u: processed upcast
     #       - profile_nb: profile number identified for our somlit    
 
-# using the method below is the right way to read the data
-# with pyrsk.RSK("/home/epoirier1/Documents/PROJETS/2025/Proc_RBR_Somlit/rawdata/sample.rsk") as rsk:
-    
     with pyrsk.RSK(path_in) as rsk:
        
-        # read the data first
+        # %% read the data first
         rsk.readdata()
         
-        
-
-        
-        # Use atmopsheric pressure patm to calculate sea pressure
-        # Enter sea pressure of the somlit day here
+        # %% Removes atmopsheric pressure patm to calculate hydrostatic sea pressure
         # In an ideal way the barometric pressure must be measured at each somlit and entered here
         # remind: -1hPa (air pressure) = +1cm sealevel
         # -100hPa = -1dbar = +1m sealevel
         rsk.deriveseapressure(patm)
         
-        
-        
-        # # computing profiles
-        # Keep a copy of the raw data to compare with the processed ones
+              
+        # %% Computing profiles
+        # Keeps a copy of the raw data to compare with the processed ones
         # the parameters below are adapted for very shallow profile like somlit
         # with acclimatation time
         #-----
         # # args pressure treshold and conductivity treshold
         # # works fine to detect 2 profiles, 2downcast, 2upcast and 2 profiles in rsk.regions
         # decreasing the treshold depth detects more profiles
-        # up to 45 profiles 
-        
+        # up to 45 profiles      
         raw = rsk.computeprofiles(p_tresh,c_tresh)
        
         
-        
-        # Correct for A2D (analog to digital) zero-holder, find the missing samples and interpolate
+        # %% Correct for A2D (analog to digital) zero-holder, find the missing samples and interpolate
+        # You must compute profile first before doing this otherwise error!!
         rsk.correcthold(action = "interp")
         
         
-        #identify proper profile number
+        # %% identify proper profile number of interest
         profile_nb = find_profile(rsk)
         print('procrsk profile nb is' + str(profile_nb))
         
         
-        # # get the indices for up a- profile_nb you want to choose, good because in a profile there is the up and down.nd down profiles
+        # %% get the indices for up a- profile_nb you want to choose, good because in a profile there is the up and down.nd down profiles
         # upcastIndices = rsk.getprofilesindices(direction="up")
         # downcastIndices = rsk.getprofilesindices(direction="down")
         
        
         
-        # Low-pass filtering, windowlength is the number of values to use to calculate an average
-        # We run at 2Hz, it is slower than the RBR (4Hz) so we won't apply any filter
-        
+        # %% Low-pass filtering, windowlength is the number of values to use to calculate an average
+        # We run at 2Hz, it is slower than the RBR (4Hz) so we won't apply any filter 
         # rsk.smooth(channels = ["temperature"], windowLength = 5)
         
-        # realignement CT
-        # time lag of the temperature sensor
+        
+        # %% realignement CT
+        # time lag of the temperature sensor that is slower than the conductivity sensor
+        # we talk about sensitivity speed with water changes
         # regarding the profiling speed very slow at somlit, and the red family of conductimeter
         # this lag must be slow << 10 ms (from processing specs, pyrsktools)
         # choosen arbitrary 5 ms shift of the temperature data earlier
         # lag = -0.005
+        # sept 2025, Mathieu Dever uses -0.045 and aligns temperature only.
         
-        #there is an issue here
+        # C-T lag
+        deltat = -0.045; # in second.
+        # Select the channel to be corrected
+        var = 'temperature';
+        rsk.alignchannel(channel=var, lag=deltat, lagunits="seconds")
+             
+        # %% Sensor proximity effect on conductivity (M. dever)
+        # Apply potential known proximity effect correction to conductivity
+
+        # Select the channel to be corrected
+        var = 'conductivity'
         
+        # proximity impact results in a scalar correction to conductivity
+        # SF=1 means no scale factor applied
+        # offset = 0 means no offset applied
+        # values may change with logger in cage or cond. sensor near metallic/plastic objects
+        SF = 1.000000
+        offset = 0
         
-        # removing loops due to swell and probe measuring its wake
-        # this might important in shallow coastal waters just as somlit location
-          
+        if (SF != 1) | (offset != 0):
+        
+            rsk.data[var] = SF * rsk.data[var] + offset
+            
+            # inserted in metadata info
+            logentry = 'in-situ adjustements to the '+var+' channel using a scaling factor of '+str(SF)+', and an offset of '+str(offset)+'.'
+            rsk.appendlog(rsk, logentry)
+            
+        # %% Computed variables
         # first derivedepth to calculate depth from corrected sea pressure
         # latitude of somlit point at Plouzané written below, comes from a dictionnary
         rsk.derivedepth(sites.site_latitudes[site_id], seawaterLibrary="TEOS-10")
@@ -460,45 +473,52 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         # possible to add an argument here to do a window average of the salinity
         # not needed here as we go slow
         rsk.derivevelocity()
-        
-        # then remove loops
-        # speed treshold 0.1m/s mini profiling speed to consider
-        # this values is important as all the data below this speed value are removed
-        rsk.removeloops(direction= "down", threshold= 0.05)
-        
-        # Derived variables
-        # Salinity
-        rsk.deriveseapressure()
-        rsk.derivedepth()
-        rsk.derivevelocity()
-    
         rsk.derivesalinity()
         rsk.derivesigma()
+                     
+        # %% then remove loops, this functions removes data or put it "nan". They must be hnadled later on
+        # removing loops due to swell and probe measuring its wake
+        # this might important in shallow coastal waters just as somlit location
+        # speed treshold 0.05m/s mini profiling speed to consider
+        # this values is important as all the data below this speed value are removed
+        # waveheight and period may affect the treshold value
+        # probably a parameter to be chosen by somlit user
+        # sometimes 50cm amplitude swell at ste anne porzic
+        # the key is the distance between the treshold and the real speed
+        # the slower you go the more affected you are by the swell
+        # if you are slow, put a treshold near you speed value
+        # if you are fast, treshold near 0, to be confirmed
+        rsk.removeloops(direction= "down", threshold= 0.05)
         
-        # trim the data to remove unwanted values out of range
+        # %% trim the data to remove unwanted values out of range
         rsk.trim(reference='salinity',range=(0,1), profiles=profile_nb, direction='both', action='remove')
-        #-------------------------------------------------------------------------
+        # %%
         # plot depth profile on full rsk file dataset, cannot show either down or up
         # show full profile by default
         # show cast = true does not work, colouring grey/white inefficient
-        '''
-        rsk.plotdata(channels="depth", profile=profile_nb)
-        '''
         
+        # rsk.plotdata(channels="depth", profile=profile_nb)
         
-        # -----------------------------------------------------------------------
+        # %%
         # create a copy to run independant processes for binaveraging and export on chosen up and down casts
         rsk_u = rsk.copy()
         rsk_d = rsk.copy()
         
         # possible de faire une boucle peut-être ci-dessous
-       
+        
+        # %% Binning parameters
         # choose bin Size here and depth limits for the binning process
         bin_size = 0.25
         start_depth = 0.75
         start_d = start_depth-(bin_size/2)
-        end_d = round(max(rsk_d.data['depth'])/bin_size)*bin_size-bin_size # this parameter must be checked for not loosing data on downcast
-         
+        # this parameter must be checked for not loosing data on downcast
+        # on somlit the profile is short (shallow depth) and we don't want to loose data 
+        # end_d = round(max(rsk_d.data['depth'])/bin_size)*bin_size-bin_size # this solution does not handle Nan values created by remove loops
+        end_d = int(np.nanmax(rsk_d.data['depth'])// bin_size) * bin_size
+    
+        
+        # contact RBR to do the binning on both up and down
+        # %% Binning down cast
         # bin average on depth 0.25dbar or 25 cm for DOWN cast
         rsk_d.binaverage(
             profiles = profile_nb, # we apply the binning only on our profile of interest
@@ -520,11 +540,13 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         plt.show()
         '''
         
+        
+        # %% Binning up cast
         rsk_u.binaverage(
             profiles = profile_nb, # we apply the binning only on our profile of interest
             binBy = "depth",
             binSize = bin_size,
-            boundary = [start_depth,max(rsk_u.data['depth']).round(0)+start_d],  # parameter to start at 0.75m depth
+            boundary = [start_depth,round(np.nanmax(rsk_u.data['depth']))+start_d],  # parameter to start at 0.75m depth, handking "nan' values
             # be carefull, choose start depth - binsize/2 to have the value starting the boundary
             direction = "up"
             )
@@ -564,7 +586,7 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         #    line = ax.get_lines()[-1]
         # plt.show()
         
-        # create a subfolder for this specific rsk file
+        # %% create a subfolder for this specific rsk file
         # Extract the base filename without extension
         base = os.path.splitext(os.path.basename(path_in))[0]
         file_output_folder = os.path.join(path_out, base)
@@ -603,12 +625,13 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         csv_u = rsk_to_profile_csv(newpath_u,0)
   
         # #output
+        
         return raw,rsk,rsk_d,rsk_u, profile_nb, file_output_folder, csv_d, csv_u
     
 
         
         
-# ****************************************************************************************************************
+# %%
 # function to procees a list of files in a chosen folder
 # list of correct rsk files to process is given in argument
 # the loop does not properly work certainly because of the variable of the profle_nb that does not update in the loop.
@@ -644,8 +667,9 @@ def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, pa
         rsksproc.process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param)
     
        
-# *****************************************************************************************************************           
+# %%          
 # function to do the processing on a single rsk file only.
+# the rsk file is supposed to contain only one profile
 # it is the same as process_rsk_folder but applied for one file only
 # it creates the figures and csv in a folder nammed after the file name
 def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param):
@@ -660,7 +684,6 @@ def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, para
     
     # Extract the base filename without extension
     base = os.path.splitext(os.path.basename(input_file))[0]
-    
     
 
     # Create a subfolder for this file
@@ -706,7 +729,7 @@ def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, para
         
 
 
-#***************************************************************************************
+#%%
 # function to find path of csv file form ProcRSK for somlit2db function
 def rsk_to_profile_csv(dir_path, profile_nb=0):
     dir_path2 = Path(dir_path).parent
@@ -715,7 +738,7 @@ def rsk_to_profile_csv(dir_path, profile_nb=0):
     return str(Path(dir_path) / filename)
 
 
-# **************************************************************************************
+# %%
 # function to process mrsk file, it means multiple rsk file containing multiple somlit in it.
 # The rbr has been set on pause only and several somlit have been saved in one rsk file only
 # the idea is to split this one rsk file in one file per day to enable the next steps of our routines
@@ -755,7 +778,7 @@ def split_rsk_by_day (mrsk_file):
             
         return created_files
     
-# ********************************************************************************
+#%%
 # Function to process a csv file outputted from procRSK custom function
 # It takes in charge up or downward cast depending on user choice
 # It modifies the file to fit to Somlit database file format
@@ -820,14 +843,27 @@ def toSomlitDB (file_path, site_id, output_file):
     # 2. Add first column filled with 5
     df.insert(0, 'ID_SITE', site_id)
     
-    #Renames columns 
-    df.rename(columns={
-        'temperature(°C)': 'TEMPERATURE',
-        'chlorophyll-a(ug/l)': 'FLUORESCENCE',
-        'par(µMol/m²/s)': 'PAR',
-        'salinity(PSU)':'SALINITE',
-        'depth(m)':'PROFONDEUR'
-    }, inplace=True)
+    # mapping to handle, changed in units, columns names etc with Ruskin versions
+    mapping = {
+        'temperature(°C)'.lower(): 'TEMPERATURE',
+        'chlorophyll-a(ug/l)'.lower(): 'FLUORESCENCE',
+        'chlorophyll-a(µg/L)'.lower(): 'FLUORESCENCE', #handles µg/L instead of ug/L
+        'par(µmol/m²/s)'.lower(): 'PAR',
+        'par(µMol/m²/s)'.lower(): 'PAR',
+        'salinity(PSU)'.lower():'SALINITE',
+        'depth(m)'.lower():'PROFONDEUR'
+        }   
+    #Renames columns
+    df.rename(columns=lambda x: mapping.get(x.lower(), x), inplace=True)
+    
+    # #Renames columns 
+    # df.rename(columns={
+    #     'temperature(°C)': 'TEMPERATURE',
+    #     'chlorophyll-a(ug/l)': 'FLUORESCENCE',
+    #     'par(µMol/m²/s)': 'PAR',
+    #     'salinity(PSU)':'SALINITE',
+    #     'depth(m)':'PROFONDEUR'
+    # }, inplace=True)
         
     
     # 3. Reorder columns so the first 3 columns are ID_SITE, DATE, HEURE
@@ -866,7 +902,7 @@ def toSomlitDB (file_path, site_id, output_file):
 
 
 
-# ****************************************************************************      
+#%%
 # function to clear the _YYYYMMDD.rsk files
 def remove_rsk_date_files(folder):
     
@@ -882,6 +918,7 @@ def remove_rsk_date_files(folder):
                 print(f"Deleted: {filepath}")
             except Exception as e:
                 print(f"❌ Failed to delete {filepath}: {e}")
+
 
 
 

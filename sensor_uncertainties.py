@@ -8,7 +8,7 @@ Created on Fri Jun 13 11:11:33 2025
 Uncertainties for each sensor channel (values in physical units).
 Applies to RBR Maestro units 231853 and 201759 from IUEM, Plouzané.
 """
-
+# values written below will be plotted + and - on either side of the data on the graph
 CHANNEL_UNCERTAINTIES = {
     'conductivity': 0.003,                   # mS/cm
     'temperature': 0.002,                    # °C
@@ -17,9 +17,9 @@ CHANNEL_UNCERTAINTIES = {
     'dissolved_o2_concentration': 2.0,       # µmol/L
     'par': 1.4,                              # µMol/m²/s
     'ph': 0.1,                               # pH units (estimated)
-    'chlorophyll-a': 2.5,                    # µg/L
-    'fdom': 25,                              # ppb
-    'turbidity': 25,                         # FTU
+    'chlorophyll-a': 0.1,                    # µg/L
+    'fdom': 0.5,                              # ppb, +/- 5%
+    'turbidity': 0.5,                         # FTU, +/-5%
     'sea_pressure': 0.375,                   # dbar (same as pressure)
     'depth': 0.375,                          # m
     'salinity': 0.01,                        # PSU (estimated)

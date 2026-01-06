@@ -443,7 +443,7 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         var = 'temperature';
         rsk.alignchannel(channel=var, lag=deltat, lagunits="seconds")
              
-        # %% Sensor proximity effect on conductivity (M. dever)
+        # %% Sensor proximity effect on conductivity (M. Dever)
         # Apply potential known proximity effect correction to conductivity
 
         # Select the channel to be corrected
@@ -464,7 +464,7 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
             logentry = 'in-situ adjustements to the '+var+' channel using a scaling factor of '+str(SF)+', and an offset of '+str(offset)+'.'
             rsk.appendlog(rsk, logentry)
             
-        # %% Computed variables
+        # %% Compute CTD secondary variables 
         # first derivedepth to calculate depth from corrected sea pressure
         # latitude of somlit point at Plouzané written below, comes from a dictionnary
         rsk.derivedepth(sites.site_latitudes[site_id], seawaterLibrary="TEOS-10")
@@ -475,8 +475,70 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         rsk.derivevelocity()
         rsk.derivesalinity()
         rsk.derivesigma()
+        
+        
+        # %% Compensate DO values from salinity (jan.2026) from M.Dever ODO_EcoCTD script
+        
+        # SUB-SAMPLING DO and temperature data from 8Hz at 1Hz        
+        # we create newvariables DOXY but later on we will add them to new channels
+        DOXY = rsk.data["dissolved_o2_concentration"]
+        DOXY_raw = np.full_like(DOXY, np.nan)
+        DOXY_raw[::8] = DOXY[::8]
+        DOXY = DOXY_raw
+        
+        DOXY_TEMP = rsk.data["temperature1"] # observe that temperature1 is the temp logger from the DO sensor
+        DOXY_TEMP_raw = np.full_like(DOXY_TEMP, np.nan)
+        DOXY_TEMP_raw[::8] = DOXY_TEMP[::8]
+        DOXY_TEMP = DOXY_TEMP_raw
+        
+        # Pressure compensation of DOXY data (if needed)
+        c0 = 3.2e-5
+        Fcp = 1 + c0 * (rsk.data["sea_pressure"] - patm)
+        DOXY = DOXY * Fcp
+        
+        # Salinity compensation (if needed)
+        S = rsk.data["salinity"]
+        Ts = np.log((298.15 - rsk.data['temperature']) / (273.15 + rsk.data['temperature']))
+        Fcs = np.exp(
+            S * (
+                -6.24097e-3
+                - 6.93498e-3 * Ts
+                - 6.90358e-3 * Ts**2
+                - 4.29155e-3 * Ts**3
+            )
+            - 3.11680e-7 * S**2
+        )
+        DOXY = DOXY * Fcs
+        
+        # Vertical alignment of DO measure
+        time = rsk.data["timestamp"]
+        time_sec = (time - time[0]) / np.timedelta64(1, "s")   # numeric seconds
+        # dp_dt is the vertical profiling speed
+        dp_dt = np.concatenate((
+            [0],
+            np.diff(rsk.data['sea_pressure']) / np.diff(time_sec)              # since time is already in seconds
+        ))
+        # set of a min speed 0.1
+        dp_dt[np.abs(dp_dt<0.1)] = 0.1
+        
+        # distance between CTD and optode [m]
+        offset = 0.472;
+        
+        # compute advective lag [in s]; that is the time it takes for a water parcel to
+        # travel the "offset" distance, given the profiling speed "dpdt"
+        lag_adv = offset/dp_dt
+        
+        mask = ~np.isnan(DOXY) # boolean showing true for nonNan values only
+        
+        DOXY[mask] = np.interp(time_sec[mask]+lag_adv[mask],time_sec[mask],DOXY[mask]) # a shift of DOXY time is done to align with CTD measurements
+        DOXY_TEMP[mask] = np.interp(time_sec[mask]+lag_adv[mask],time_sec[mask],DOXY_TEMP[mask])# a shift of temperature1 time is done to align with CTD measurements
+        
+        # create a new channel to attribute the DO corrected data calculated above and the corresponding temperaure1 serie
+        rsk.addchannel(DOXY, "DO_compensated", units="µmol/L", isMeasured = 0, isDerived = 1)
+        rsk.addchannel(DOXY_TEMP, "temperature1_compensated", units="°C", isMeasured = 1, isDerived = 0)
                      
-        # %% then remove loops, this functions removes data or put it "nan". They must be hnadled later on
+                     
+        # %% then remove loops, this functions removes data or put it "nan". They must be handled later on
         # removing loops due to swell and probe measuring its wake
         # this might important in shallow coastal waters just as somlit location
         # speed treshold 0.05m/s mini profiling speed to consider
@@ -539,7 +601,6 @@ def procRSK (path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
             )
         plt.show()
         '''
-        
         
         # %% Binning up cast
         rsk_u.binaverage(

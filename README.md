@@ -71,13 +71,14 @@ You can rename the environement at this setp.
 
 5. Update the **main.py** file with the correct path where you have stored the repository
 
-6. Run the program 
+6. To test the code on the raw_rsk_files provided run the program main.py
     ```bash
     python main.py
     ```
 7. A folder is created under your_path/Somlit_rbr_toolbox/procdata
 containing the outputs for all the .rsk files processed. They are stored in one
-folder for each daily file.
+folder for each daily file. These data (raw_rsk_files) have been acquired during SOMLIT profiles at
+Ste-Anne du Porzic, Plouzané, Finistère during the summer 2024.
 
 ## Avenues for Improvement
 
@@ -89,7 +90,7 @@ Contributions are welcomed to improve these points.
 
 ## To contribute
 
-Follow this procedure contribute:
+Follow this procedure to contribute:
 
 1. **Fork the repository** and create your branch (my-new-feature):
 

@@ -16,7 +16,7 @@ CHANNEL_UNCERTAINTIES = {
     'temperature1': 0.002,                   # °C
     'temperature1_compensated': 0.002,       # °C
     'dissolved_o2_concentration': 2.0,       # µmol/L
-    'DO_compensated': 2.0,                   # µmol/L
+    'dissolved_o2_compensated': 2.0,                   # µmol/L
     'par': 1.4,                              # µMol/m²/s
     'ph': 0.1,                               # pH units (estimated)
     'chlorophyll-a': 0.1,                    # µg/L
@@ -32,16 +32,17 @@ CHANNEL_UNCERTAINTIES = {
     'density_anomaly': 0                     # kg/m³ (unknown)
 }
 
+
 def get_uncertainty(channel_name):
     """
     Return the uncertainty for a given channel name.
-    
+
     Parameters:
         channel_name (str): Name of the sensor channel.
-    
+
     Returns:
         float: Uncertainty value for the specified channel.
-    
+
     Raises:
         KeyError: If the channel is not found in the dictionary.
     """

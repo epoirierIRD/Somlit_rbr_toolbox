@@ -6,13 +6,20 @@
 *![Last Commit](https://img.shields.io/github/last-commit/epoirierIRD/Somlit_rbr_toolbox)*
 ## Description
 
-This GitHub repository holds python functions to process RBR Maestro CTD data collected at SOMLIT observatory in Plouzané, France. It can be adapted to other SOMLIT sites.
+This GitHub repository holds python functions to process RBR Maestro CTD data collected at SOMLIT observatory in Plouzané, France. It is meant to be adaptable to other SOMLIT sites and
+to be used by the whole SOMLIT community.
 
-The aim is to provide [SOMLIT](https://www.somlit.fr/) community a list of functions to help process RBR CTD data according to SOMLIT standards. It could useful if your SBE CTD is in calibration and is temporary, perhaps definitely replaced by a RBR Maestro. CTD is deployed in shallow water (< 10m depth) off a quay.
+The aim is to provide [SOMLIT](https://www.somlit.fr/) community a list of functions to help process RBR CTD data according to SOMLIT standards. It could useful if your SBE CTD is in calibration and is temporary,
+perhaps definitely replaced by a RBR Maestro. CTD is deployed in shallow water (< 10m depth) off a quay.
 
 The functions are based on [pyRSKtools](https://docs-static.rbr-global.com/pyrsktools/index.html) free library developped by RBR. 
+Use pyRSKtools version 1.1.2 (oct. 2025).
 
-It has been developped at the European Institute for Marine Studies (IUEM), Plouzané, France. It is open-source to encourage colleagues from oceanographic research laboratories use it and contribute.
+It has been developped at the European Institute for Marine Studies (IUEM), Plouzané, France. Specifications have been drawn up by Emilie Grossteffan and Peggy Rimmelin-Maury, active members of the SOMLIT community.
+Code has been written by Etienne Poirier, IRD instrumentalist engineer, non SOMLIT member. Be aware that it is a code written by a non-IT engineer with all the cons that this implies.
+
+It is open-source to encourage colleagues from oceanographic research laboratories use it and contribute.
+The author would like to thank Mathieu Dever, RBR chief scientist for sharing his code and tutorials especially on RBR CODA data processing.
 
 ## Contents
 
@@ -27,7 +34,7 @@ It has been developped at the European Institute for Marine Studies (IUEM), Plou
     conda env export > environment.yml
     ```
 
-## Features
+## Code features
 
 - Reads a list of raw .rsk files in a folder:
     - find in each .rsk file the date and create a unique .rsk file per day
@@ -80,11 +87,18 @@ containing the outputs for all the .rsk files processed. They are stored in one
 folder for each daily file. These data (raw_rsk_files) have been acquired during SOMLIT profiles at
 Ste-Anne du Porzic, Plouzané, Finistère during the summer 2024.
 
+## Raise an issue
+
+- When using the code any issue you will see or any idea that comes to your mind, please submit it via the github toolbox
+Issue/ Create new Issue. That will help developpers improving the code for your needs.
+
 ## Avenues for Improvement
 
-- Remove useless lines of code
-- Develop new function
-- Develop a friendly user interface for non python users
+- Migrate the repository for github to https://versio.iuem.eu GitLab
+- Remove useless lines of code / excessive comments
+- Develop new functions
+- Develop a friendly user interface for non python users, perhaps with a Windows .exe program
+- Rebuilt the code with an object object-oriented programming (OOP) strategy
 
 Contributions are welcomed to improve these points.
 
@@ -101,8 +115,7 @@ Follow this procedure to contribute:
 2. **Make your changes** and test them thoroughly.
 
 
-
-4. **Submit a Pull Request** with a detailed description of your changes.
+3. **Submit a Pull Request** with a detailed description of your changes.
 
 ## Contributors
 

@@ -14,7 +14,9 @@ CHANNEL_UNCERTAINTIES = {
     'temperature': 0.002,                    # °C
     'pressure': 0.375,                       # dbar
     'temperature1': 0.002,                   # °C
+    'temperature1_compensated': 0.002,       # °C
     'dissolved_o2_concentration': 2.0,       # µmol/L
+    'DO_compensated': 2.0,                   # µmol/L
     'par': 1.4,                              # µMol/m²/s
     'ph': 0.1,                               # pH units (estimated)
     'chlorophyll-a': 0.1,                    # µg/L

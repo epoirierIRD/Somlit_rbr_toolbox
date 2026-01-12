@@ -27,23 +27,29 @@ The author would like to thank Mathieu Dever, RBR chief scientist for sharing hi
 - **RSKsomlit_proc.py**: contains processing functions only
 - **sensor_uncertainties.py** is a ressource file containing the sensor uncertainties for each channel used to show the error bars in the plots
 - **sites.py** is the list of SOMLIT sites with corresponding Lat, Lon used in the processing
-- **main.py** is the main python script to run to process the list of .rsk files located in the raw_rsk_files folder
-- **raw_rsk_files** is a folder containing raw rsk files to process. They have logged during the summer 2024 at the SOMLIT point of Plouzané by the SOMLIT team of IUEM
+- **main_process.py** is the script to run to process the rbr_maestro.rsk files located in the raw_data folder
+- **main_SBE_rbr_compar.py** is the script to compar processed RBR data with processed SBE data when doing an inter-comparison
+- **raw_data** is a folder containing a raw rsk file to process and processed SBE data files to use as reference.
+    rbr_maestro.rsk contains a profile from Lanveoc (14/10/2025) and 2 profiles from Ste Anne du Porzic(16/10/2025)
 - **environment.yml** is the file containing all packages and dependencies of the conda environment used to develop the code. It hase been created with command:
     ```bash
     conda env export > environment.yml
     ```
 
 ## Code features
-
-- Reads a list of raw .rsk files in a folder:
-    - find in each .rsk file the date and create a unique .rsk file per day
+**main_process.py**
+- Reads a raw .rsk file:
+    - creates one .rsk file per profile (in /proc_data/)
     - handles multiples days in a .rsk file
-    - handles dupplicated days in the folder to have one file per day only
 - Process each daily .rsk file:
     - computes down(d) and up(u) casts with 0.25 m binning
     - outputs RBR .csv and SOMLIT .txt files for d and u casts
     - outputs graphics with d and u cast for each parameter (salinity, temperature, etc...)
+    - outputs in '/proc_data/outputs
+
+**main_SBE_rbr_compar.py**
+- Reads processed rbr file with upcast and downcast from proc_data/outputs
+- Compares RBR data with SBE data (/raw_data) on upcast and downcast and output plots in /figures
 
 <p align="center">
   <img src="images/temperature.png" alt="Temperature graph" width="500"/>
@@ -51,8 +57,8 @@ The author would like to thank Mathieu Dever, RBR chief scientist for sharing hi
 
 ## Functionality
 
-- The code is based on pyRSKtools open source RBR python library to process the data
-- Custom functions have been developped to avoid opening Ruskin and reduce clicks when handling the .rsk files and detecting the SOMLIT days and profiles. 
+- The code is based on **pyRSKtools v1.1.2** open source RBR python library to process the data
+- Custom functions have been developped to avoid opening Ruskin GUI and reduce clicks when handling the .rsk files and detecting the SOMLIT days and profiles
 - Plots are to help the user choose between the down or the upcast which to save in the SOMLIT DB. 
 
 ## Using the code
@@ -76,16 +82,15 @@ The author would like to thank Mathieu Dever, RBR chief scientist for sharing hi
     ```
 You can rename the environement at this setp.
 
-5. Update the **main.py** file with the correct path where you have stored the repository
+5. Update the **main_process.py** file with the correct path where you have stored the repository if needed
 
-6. To test the code on the raw_rsk_files provided run the program main.py
+6. To test the code on the raw_data provided run the program main_process.py
     ```bash
-    python main.py
+    python main_process.py
     ```
-7. A folder is created under your_path/Somlit_rbr_toolbox/procdata
-containing the outputs for all the .rsk files processed. They are stored in one
-folder for each daily file. These data (raw_rsk_files) have been acquired during SOMLIT profiles at
-Ste-Anne du Porzic, Plouzané, Finistère during the summer 2024.
+7. A folder is created under your_path/Somlit_rbr_toolbox/proc_data
+contaiins the outputs for all the .rsk files processed. They are stored in one
+folder for each daily file. 
 
 ## Raise an issue
 
@@ -103,6 +108,9 @@ Issue/ Create new Issue. That will help developpers improving the code for your 
 Contributions are welcomed to improve these points.
 
 ## To contribute
+
+First step to contribute is to raise issues! 
+Otherwise:
 
 Follow this procedure to contribute:
 

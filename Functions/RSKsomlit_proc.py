@@ -750,11 +750,11 @@ def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, pa
 
     '''
 
-    # assuming the rsk files are in a raw data folder, we want to store
+    # assuming the rsk files are in a raw data folder given, we want to store
     # the processes_data in a proc_data dir
     # get the dir a step up
-    parent_dir = os.path.dirname(path_in)
-    path_out = os.path.join(parent_dir, "procdata")
+    # parent_dir = os.path.dirname(path_in)
+    path_out = os.path.join(path_in, "outputs")
     # creates the path_out directory woth proc_data if it don't already exists
     os.makedirs(path_out, exist_ok=True)
 

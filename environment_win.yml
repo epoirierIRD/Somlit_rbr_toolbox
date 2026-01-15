@@ -1,4 +1,4 @@
-name: myenv
+name: proc-somlit
 channels:
   - conda-forge
   - defaults

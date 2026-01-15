@@ -210,9 +210,14 @@ def has_multiple_days_and_dates(rsk_file):
 
 def scan_rsk(path_in):
     """
-    This function scans the rsk files in my folder path_in
-    splits by date if I have a multiple rsk
-    outputs the list of files rsk kept for next processing step
+    This function scans the raw rsk files in my folder path_in
+    If I have a multiple dates in the rsk, it splits by date the rsk
+    and creates new rsk _YYYYMMDD.rsk, one per day in /proc_data
+    
+    Removes _YYYYMMDD.rsk in proc_data files before running the code to work only on raw_rsk files
+    Beware that if a raw rsk file name is _YYYYNNDD, it will be removed
+    After the processing it removes the duplicated files. somettimes data of the day -1 
+    are kept in day 1 rsk file, that will lead in two day-1 files identical
 
     Parameters
     ----------
@@ -225,12 +230,20 @@ def scan_rsk(path_in):
         List of rsk files names kept after the scanning
 
     """
+     
+    # Path of the new 'proc_data' folder
+    proc_data_path = os.path.join(path_in, "proc_data")
+    print('proc_data_path',proc_data_path)
+    
+    # Create the folder if it doesn't exist
+    os.makedirs(proc_data_path, exist_ok=True)
 
     # to clear the folder with the previous _YYYYMMDD rsk files
-    remove_rsk_date_files(path_in)
+    remove_rsk_date_files(proc_data_path)
 
-    # creates the list of rsk files originals with path
+    # creates the list of raw rsk files of interest found in path_in
     rsk_files = glob.glob(os.path.join(path_in, "*.rsk"))
+    
     # list of file names only
     file_names = [os.path.basename(path) for path in rsk_files]
     print("Scanning RSK files, checking for multiple dates in files:")
@@ -239,6 +252,7 @@ def scan_rsk(path_in):
         print(name)
 
     final_dates = []
+    created_files = []
 
     # loop on my list of files, input file is a rsk file
     for i, input_file in enumerate(rsk_files):
@@ -262,7 +276,7 @@ def scan_rsk(path_in):
             print("found multiple dates in file:")
             print(input_file)
             # split the rsk if it is multiple, unique_days is a list of dates
-            created_files = rsksproc.split_rsk_by_day(input_file)
+            created_files = rsksproc.split_rsk_by_day(input_file, proc_data_path)
 
         else:  # when no multiple date
             # we have to rename _YYYYmmdd when our file is not duplicate
@@ -276,8 +290,8 @@ def scan_rsk(path_in):
             # Save the new RSK file
             with pyrsk.RSK(input_file) as rsk:
                 rsk.readdata()
-                # Writes the new rsk file to keep the original one
-                output_file = rsk.RSK2RSK(suffix=day_str)
+                # Writes the new rsk file in the same folder and keep the original one
+                output_file = rsk.RSK2RSK(outputDir=proc_data_path,suffix=day_str)
                 created_files.append(output_file)
 
     final_dates.sort(
@@ -289,7 +303,7 @@ def scan_rsk(path_in):
         print(date)
 
     # remove duplicate files per day, some rsk files have the same day in it
-    result = remove_duplicates(path_in)
+    result = remove_duplicates(proc_data_path)
 
     # sort files by date
     sorted_kept = sort_files_by_yymmdd(result["kept"])
@@ -511,7 +525,7 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         # latitude of somlit point at Plouzané written below, comes from the
         # dictionnary sites.py
         rsk.derivedepth(
-            sites.site_latitudes[site_id], seawaterLibrary="TEOS-10"
+            sites.sites[site_id]["latitude"], seawaterLibrary="TEOS-10"
         )
 
         # derive velocity , calculate velocity from depth and time
@@ -754,20 +768,35 @@ def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, pa
     # the processes_data in a proc_data dir
     # get the dir a step up
     # parent_dir = os.path.dirname(path_in)
+    
     path_out = os.path.join(path_in, "outputs")
     # creates the path_out directory woth proc_data if it don't already exists
     os.makedirs(path_out, exist_ok=True)
-
+    
     # Extract just the filenames from the list
-    rsk_filenames_from_list = {os.path.basename(path) for path in list_of_rsk}
+    # rsk_filenames_from_list = {os.path.basename(path) for path in list_of_rsk}
+    
     # List of all rsk files in target directory
-    all_files_in_dir = os.listdir(path_in)
-    # finding the matching rsk files between two lists
+    # all_files_in_dir = os.listdir(path_in)
+    
+    
+    '''
+    # finding the matching rsk files between two lists    
     valid_files_to_process = [
         os.path.join(path_in, f)
         for f in all_files_in_dir
         if f in rsk_filenames_from_list
     ]
+    
+    
+    print("list_of_rsk:", list_of_rsk)
+    print("rsk_filenames_from_list:", rsk_filenames_from_list)
+    print("all_files_in_dir:", all_files_in_dir)
+    print("valid_files_to_process:", valid_files_to_process)
+    '''
+    # no need to filter as done previously
+    valid_files_to_process = list_of_rsk
+    
     print("🔄 List of files to be processed:")
     valid_sorted = sort_files_by_yymmdd(
         valid_files_to_process
@@ -897,7 +926,7 @@ def rsk_to_profile_csv(dir_path, profile_nb=0):
 
 # %% split_rsk_by_day
 
-def split_rsk_by_day(mrsk_file):
+def split_rsk_by_day(mrsk_file, output_dir):
     '''
     Function to process mrsk file. A mrsk file is a RSK file containing multiple somlit days in it.
     It comes because the RBR probe has been set on pause between the Somlits. Therefore several somlit days
@@ -908,6 +937,8 @@ def split_rsk_by_day(mrsk_file):
     ----------
     mrsk_file : str
         Path to the multiple RSK file to split
+    output_dir : str
+        Directory adress to save the newly created rsk
 
     Returns
     -------
@@ -940,7 +971,7 @@ def split_rsk_by_day(mrsk_file):
             day_str = str(day).replace("-", "")
 
             # Save the new RSK file
-            output_file = day_rsk.RSK2RSK(suffix=day_str)  # Writes the file
+            output_file = day_rsk.RSK2RSK(outputDir=output_dir, suffix=day_str)  # Writes the file
             created_files.append(output_file)
 
             print(f"✅ Saved: {output_file}")

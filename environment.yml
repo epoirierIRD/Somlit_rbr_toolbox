@@ -1,4 +1,4 @@
-name: base
+name: proc-somlit
 channels:
   - defaults
   - conda-forge

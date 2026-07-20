@@ -3,16 +3,20 @@
 """
 Script file name: RSKsomlit_proc.py
 Author: Etienne Poirier, IRD, Plouzané
+Modified: Aurélien DOMEAU, CNRS, Sète with Claude Sonnet 5
 Date created: 2025-06-02
-Last update: 2026-01-08
-Description: various processing functions for RBR Maestro profile data 
+Last update: 2026-07-16
+
+Description: various processing functions for RBR CTD profile data 
 used in Somlit experiments.
+
 Crucial function: procRSK that processes a RSK file and its channels
 """
 import pyrsktools as pyrsk
 import numpy as np
 import os
 import math
+import time
 import pandas as pd
 from datetime import datetime
 import glob
@@ -24,6 +28,7 @@ import re
 import sites
 import RSKsomlit_proc as rsksproc
 import RSKsomlit_plt as rsksplt
+import channel_utils
 
 
 # %% Processing functions below
@@ -210,9 +215,14 @@ def has_multiple_days_and_dates(rsk_file):
 
 def scan_rsk(path_in):
     """
-    This function scans the rsk files in my folder path_in
-    splits by date if I have a multiple rsk
-    outputs the list of files rsk kept for next processing step
+    This function scans the raw rsk files in my folder path_in
+    If I have a multiple dates in the rsk, it splits by date the rsk
+    and creates new rsk _YYYYMMDD.rsk, one per day in /proc_data
+    
+    Removes _YYYYMMDD.rsk in proc_data files before running the code to work only on raw_rsk files
+    Beware that if a raw rsk file name is _YYYYNNDD, it will be removed
+    After the processing it removes the duplicated files. somettimes data of the day -1 
+    are kept in day 1 rsk file, that will lead in two day-1 files identical
 
     Parameters
     ----------
@@ -225,12 +235,20 @@ def scan_rsk(path_in):
         List of rsk files names kept after the scanning
 
     """
+     
+    # Path of the new 'proc_data' folder
+    proc_data_path = os.path.join(path_in, "proc_data")
+    print('proc_data_path',proc_data_path)
+    
+    # Create the folder if it doesn't exist
+    os.makedirs(proc_data_path, exist_ok=True)
 
     # to clear the folder with the previous _YYYYMMDD rsk files
-    remove_rsk_date_files(path_in)
+    remove_rsk_date_files(proc_data_path)
 
-    # creates the list of rsk files originals with path
+    # creates the list of raw rsk files of interest found in path_in
     rsk_files = glob.glob(os.path.join(path_in, "*.rsk"))
+    
     # list of file names only
     file_names = [os.path.basename(path) for path in rsk_files]
     print("Scanning RSK files, checking for multiple dates in files:")
@@ -239,6 +257,7 @@ def scan_rsk(path_in):
         print(name)
 
     final_dates = []
+    created_files = []
 
     # loop on my list of files, input file is a rsk file
     for i, input_file in enumerate(rsk_files):
@@ -262,7 +281,7 @@ def scan_rsk(path_in):
             print("found multiple dates in file:")
             print(input_file)
             # split the rsk if it is multiple, unique_days is a list of dates
-            created_files = rsksproc.split_rsk_by_day(input_file)
+            created_files = rsksproc.split_rsk_by_day(input_file, proc_data_path)
 
         else:  # when no multiple date
             # we have to rename _YYYYmmdd when our file is not duplicate
@@ -276,8 +295,8 @@ def scan_rsk(path_in):
             # Save the new RSK file
             with pyrsk.RSK(input_file) as rsk:
                 rsk.readdata()
-                # Writes the new rsk file to keep the original one
-                output_file = rsk.RSK2RSK(suffix=day_str)
+                # Writes the new rsk file in the same folder and keep the original one
+                output_file = rsk.RSK2RSK(outputDir=proc_data_path,suffix=day_str)
                 created_files.append(output_file)
 
     final_dates.sort(
@@ -289,7 +308,7 @@ def scan_rsk(path_in):
         print(date)
 
     # remove duplicate files per day, some rsk files have the same day in it
-    result = remove_duplicates(path_in)
+    result = remove_duplicates(proc_data_path)
 
     # sort files by date
     sorted_kept = sort_files_by_yymmdd(result["kept"])
@@ -386,8 +405,60 @@ def sort_files_by_yymmdd(files):
     return sorted(files, key=extract_date)
 
 
+# %% _rsk2csv_with_retry
+
+def _rsk2csv_with_retry(rsk_obj, channels, profiles, comment, output_dir,
+                         max_retries=3, delay=1.5):
+    '''
+    Thin wrapper around RSK.RSK2CSV() that retries on PermissionError.
+
+    On Windows, a freshly created/deleted file inside a folder synced by
+    OneDrive (or scanned by antivirus real-time protection) can be
+    transiently locked for a fraction of a second right after it's written,
+    causing a "[Errno 13] Permission denied" even though the destination
+    folder itself is perfectly writable. A short retry/backoff is enough to
+    ride out this kind of transient lock instead of aborting the whole file's
+    processing (which was silently skipping the SOMLIT export downstream).
+
+    Parameters
+    ----------
+    rsk_obj : RSK object
+        rsk_d or rsk_u, the object whose RSK2CSV() method is being called
+    channels, profiles, comment, output_dir :
+        same arguments as RSK.RSK2CSV()
+    max_retries : int, optional
+        number of attempts before giving up and re-raising. Default 3.
+    delay : float, optional
+        seconds to wait between attempts. Default 1.5.
+
+    Returns
+    -------
+    None.
+    '''
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            rsk_obj.RSK2CSV(
+                channels=channels,
+                profiles=profiles,
+                comment=comment,
+                outputDir=output_dir,
+            )
+            return
+        except PermissionError as e:
+            last_err = e
+            print(f"[WARNING] Accès refusé en écriture (probablement un verrou "
+                  f"temporaire OneDrive/antivirus) — tentative {attempt}/{max_retries}, "
+                  f"nouvel essai dans {delay}s. Détail: {e}")
+            time.sleep(delay)
+    # all retries exhausted, re-raise so the caller's try/except still logs the failure
+    raise last_err
+
+
 # %% *** procRSK ***
-def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
+def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out,
+            ct_lag=-0.045, cond_scale_factor=1.000000, cond_offset=0,
+            do_sensor_offset=0.472):
     """
     This function is to process a raw rsk file containing one single SOMLIT 
     experiment on one single day. It applies all the required processing on the
@@ -414,9 +485,24 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
        conductivity treshold (mS/cm) parameter used in pyRSKtools.computeprofile() 
     param : List
         List of channel names that you want to keep in your processed RBR. csv
-        destination file
+        destination file. This is now treated as a "wishlist": channels that
+        are not physically present on this particular probe (e.g. no DO sensor
+        on a Concerto) are automatically skipped instead of raising an error.
     path_out : str
         Location path to the output folder of your choice for the processed data
+    ct_lag : float, optional
+        time lag (s) applied to the temperature channel to realign it with
+        conductivity (sensor response time mismatch). Default is the value
+        historically used for the Maestro (-0.045 s). Adjust per probe if needed.
+    cond_scale_factor : float, optional
+        scale factor (SF) applied to conductivity to correct for sensor proximity
+        effects. Default 1.0 (no correction).
+    cond_offset : float, optional
+        offset applied to conductivity for the same proximity correction. Default 0.
+    do_sensor_offset : float, optional
+        distance (m) between the CTD and the DO optode, used to compute the
+        advective lag correction. Only used if a DO sensor is detected on this
+        probe; ignored otherwise (e.g. Concerto without oxygen sensor).
 
     Returns
     -------
@@ -466,6 +552,22 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         profile_nb = find_profile(rsk)
         print("procrsk profile nb is" + str(profile_nb))
 
+        # Detect logical channels really available on this probe (auto-detection,
+        # works for any RBR probe: Maestro, Concerto, Duo...). This lets the rest
+        # of the function skip processing steps for sensors that are physically
+        # absent (e.g. no DO optode / no fluorometer on a Concerto) instead of
+        # crashing on a hardcoded channel name.
+        available_channels = channel_utils.get_available_channels(rsk)
+        print(f"Channels detected in {os.path.basename(path_in)}: {available_channels}")
+
+        has_do_sensor = (
+            channel_utils.has_channel(rsk, "dissolved_o2_concentration")
+            and channel_utils.has_channel(rsk, "temperature1")
+        )
+        if not has_do_sensor:
+            print(f"[INFO] No DO sensor (dissolved_o2_concentration + temperature1) "
+                  f"detected on {os.path.basename(path_in)} — DO compensation will be skipped.")
+
         # Low-pass filtering, windowlength is the number of values to use to calculate an average
         # We run at 2Hz, it is slower than the RBR (4Hz) so we won't apply any filter
         # rsk.smooth(channels = ["temperature"], windowLength = 5)
@@ -473,7 +575,7 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         # realignement CT (M. Dever)
         # time lag of the temperature sensor that is slower than the conductivity sensor
         # we talk about sensitivity speed with water changes
-        deltat = -0.045  # in second.
+        deltat = ct_lag  # in second, per-probe tunable (see procRSK parameters)
         # Select the channel to be corrected
         var = "temperature"
         rsk.alignchannel(channel=var, lag=deltat, lagunits="seconds")
@@ -487,8 +589,8 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         # SF=1 means no scale factor applied
         # offset = 0 means no offset applied
         # values may change with logger in cage or cond. sensor near metallic/plastic objects
-        SF = 1.000000
-        offset = 0
+        SF = cond_scale_factor
+        offset = cond_offset
 
         if (SF != 1) | (offset != 0):
 
@@ -508,10 +610,13 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
 
         # Compute CTD secondary variables
         # first derivedepth to calculate depth from corrected sea pressure
-        # latitude of somlit point at Plouzané written below, comes from the
-        # dictionnary sites.py
+        # latitude of somlit point comes from the dictionnary sites.py,
+        # looked up by its actual "id" field (see sites.get_site() docstring:
+        # sites.sites[site_id] was indexing the list by POSITION, which
+        # silently returned the wrong station for some ids and raised
+        # IndexError for others, e.g. site_id=22 for Sète).
         rsk.derivedepth(
-            sites.site_latitudes[site_id], seawaterLibrary="TEOS-10"
+            sites.get_site(site_id)["latitude"], seawaterLibrary="TEOS-10"
         )
 
         # derive velocity , calculate velocity from depth and time
@@ -522,87 +627,93 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         rsk.derivesigma()
 
         # Compensate DO values from salinity (jan.2026) from M.Dever ODO_EcoCTD script
+        # This whole block only makes sense if the probe actually has a DO optode
+        # (e.g. Maestro with Tridente/ODO). A Concerto (CTD + PAR only) or any
+        # other probe without oxygen simply skips this step.
+        if has_do_sensor:
 
-        # SUB-SAMPLING DO and temperature data from 8Hz at 1Hz
-        # we create newvariables DOXY but later on we will add them to new channels
-        DOXY = rsk.data["dissolved_o2_concentration"]
-        DOXY_raw = np.full_like(DOXY, np.nan)
-        DOXY_raw[::8] = DOXY[::8]
-        DOXY = DOXY_raw
+            # SUB-SAMPLING DO and temperature data from 8Hz at 1Hz
+            # we create newvariables DOXY but later on we will add them to new channels
+            # names resolved via channel_utils in case the real channel is stored
+            # under an alias (e.g. "odo_temperature" instead of "temperature1")
+            DOXY = channel_utils.get_channel_array(rsk, "dissolved_o2_concentration")
+            DOXY_raw = np.full_like(DOXY, np.nan)
+            DOXY_raw[::8] = DOXY[::8]
+            DOXY = DOXY_raw
 
-        # observe that temperature1 is the temp logger from the DO sensor
-        DOXY_TEMP = rsk.data["temperature1"]
-        DOXY_TEMP_raw = np.full_like(DOXY_TEMP, np.nan)
-        DOXY_TEMP_raw[::8] = DOXY_TEMP[::8]
-        DOXY_TEMP = DOXY_TEMP_raw
+            # observe that temperature1 is the temp logger from the DO sensor
+            DOXY_TEMP = channel_utils.get_channel_array(rsk, "temperature1")
+            DOXY_TEMP_raw = np.full_like(DOXY_TEMP, np.nan)
+            DOXY_TEMP_raw[::8] = DOXY_TEMP[::8]
+            DOXY_TEMP = DOXY_TEMP_raw
 
-        # Pressure compensation of DOXY data (if needed)
-        c0 = 3.2e-5
-        Fcp = 1 + c0 * (rsk.data["sea_pressure"] - patm)
-        DOXY = DOXY * Fcp
+            # Pressure compensation of DOXY data (if needed)
+            c0 = 3.2e-5
+            Fcp = 1 + c0 * (rsk.data["sea_pressure"] - patm)
+            DOXY = DOXY * Fcp
 
-        # Salinity compensation (if needed)
-        S = rsk.data["salinity"]
-        Ts = np.log(
-            (298.15 - rsk.data["temperature"])
-            / (273.15 + rsk.data["temperature"])
-        )
-        Fcs = np.exp(
-            S
-            * (
-                -6.24097e-3
-                - 6.93498e-3 * Ts
-                - 6.90358e-3 * Ts**2
-                - 4.29155e-3 * Ts**3
+            # Salinity compensation (if needed)
+            S = rsk.data["salinity"]
+            Ts = np.log(
+                (298.15 - rsk.data["temperature"])
+                / (273.15 + rsk.data["temperature"])
             )
-            - 3.11680e-7 * S**2
-        )
-        DOXY = DOXY * Fcs
-
-        # Vertical alignment of DO measure
-        time = rsk.data["timestamp"]
-        time_sec = (time - time[0]) / np.timedelta64(1, "s")  # numeric seconds
-        # dp_dt is the vertical profiling speed
-        dp_dt = np.concatenate(
-            (
-                [0],
-                # since time is already in seconds
-                np.diff(rsk.data["sea_pressure"]) / np.diff(time_sec),
+            Fcs = np.exp(
+                S
+                * (
+                    -6.24097e-3
+                    - 6.93498e-3 * Ts
+                    - 6.90358e-3 * Ts**2
+                    - 4.29155e-3 * Ts**3
+                )
+                - 3.11680e-7 * S**2
             )
-        )
-        # set of a min speed 0.1
-        dp_dt[np.abs(dp_dt < 0.1)] = 0.1
+            DOXY = DOXY * Fcs
 
-        # distance between CTD and optode [m]
-        offset = 0.472
+            # Vertical alignment of DO measure
+            time = rsk.data["timestamp"]
+            time_sec = (time - time[0]) / np.timedelta64(1, "s")  # numeric seconds
+            # dp_dt is the vertical profiling speed
+            dp_dt = np.concatenate(
+                (
+                    [0],
+                    # since time is already in seconds
+                    np.diff(rsk.data["sea_pressure"]) / np.diff(time_sec),
+                )
+            )
+            # set of a min speed 0.1
+            dp_dt[np.abs(dp_dt < 0.1)] = 0.1
 
-        # compute advective lag [in s]; that is the time it takes for a water parcel to
-        # travel the "offset" distance, given the profiling speed "dpdt"
-        lag_adv = offset / dp_dt
+            # distance between CTD and optode [m], per-probe tunable
+            optode_offset = do_sensor_offset
 
-        mask = ~np.isnan(DOXY)  # boolean showing true for nonNan values only
+            # compute advective lag [in s]; that is the time it takes for a water parcel to
+            # travel the "offset" distance, given the profiling speed "dpdt"
+            lag_adv = optode_offset / dp_dt
 
-        # a shift of DOXY time is done to align with CTD measurements
-        DOXY[mask] = np.interp(
-            time_sec[mask] + lag_adv[mask], time_sec[mask], DOXY[mask]
-        )
-        # a shift of temperature1 time is done to align with CTD measurements
-        DOXY_TEMP[mask] = np.interp(
-            time_sec[mask] + lag_adv[mask], time_sec[mask], DOXY_TEMP[mask]
-        )
+            mask = ~np.isnan(DOXY)  # boolean showing true for nonNan values only
 
-        # create a new channel to attribute the DO corrected data calculated above
-        # and the corresponding temperaure1 serie
-        rsk.addchannel(
-            DOXY, "dissolved_o2_compensated", units="µmol/L", isMeasured=0, isDerived=1
-        )
-        rsk.addchannel(
-            DOXY_TEMP,
-            "temperature1_compensated",
-            units="°C",
-            isMeasured=1,
-            isDerived=0,
-        )
+            # a shift of DOXY time is done to align with CTD measurements
+            DOXY[mask] = np.interp(
+                time_sec[mask] + lag_adv[mask], time_sec[mask], DOXY[mask]
+            )
+            # a shift of temperature1 time is done to align with CTD measurements
+            DOXY_TEMP[mask] = np.interp(
+                time_sec[mask] + lag_adv[mask], time_sec[mask], DOXY_TEMP[mask]
+            )
+
+            # create a new channel to attribute the DO corrected data calculated above
+            # and the corresponding temperaure1 serie
+            rsk.addchannel(
+                DOXY, "dissolved_o2_compensated", units="µmol/L", isMeasured=0, isDerived=1
+            )
+            rsk.addchannel(
+                DOXY_TEMP,
+                "temperature1_compensated",
+                units="°C",
+                isMeasured=1,
+                isDerived=0,
+            )
 
         # Remove loops, this functions removes data or put it "nan". They must be handled later on
         # removing loops due to swell and probe measuring its wake
@@ -616,7 +727,19 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         # the slower you go the more affected you are by the swell
         # if you are slow, put a treshold near you speed value
         # if you are fast, treshold near 0, to be confirmed
-        rsk.removeloops(direction="down", threshold=0.05)
+        #
+        # BUGFIX: must be restricted to profiles=profile_nb, exactly like the
+        # trim() call just below already does. Without it, removeloops()
+        # processes EVERY profile region that computeprofiles() detected in
+        # the whole file - including tiny spurious ones (e.g. the probe
+        # dipped in/out of the water a couple of times right before the real
+        # cast, each dip briefly toggling conductivity and getting counted as
+        # its own 2-3 sample "profile"). pyrsktools's own removeloops()
+        # implementation indexes into these profiles assuming at least 2
+        # points, and raises "IndexError: index 1 is out of bounds for axis 0
+        # with size 1" on any profile that only has 1 sample once trimmed -
+        # observed on an RBR Concerto cast preceded by such calibration dips.
+        rsk.removeloops(profiles=profile_nb, direction="down", threshold=0.05)
 
         # trim the data to remove unwanted values out of range
         rsk.trim(
@@ -680,27 +803,44 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
         newpath_u = file_output_folder + "/upcast"
         newpath_d = file_output_folder + "/downcast"
 
-        if not os.path.exists(newpath_u) and not os.path.exists(newpath_d):
-            os.makedirs(newpath_u)
-            os.makedirs(newpath_d)
+        # BUGFIX: previously both folders were only created if NEITHER existed,
+        # so on a re-run where only one of the two was present (e.g. partial
+        # previous run, or one manually deleted), the missing one was never
+        # created and the corresponding RSK2CSV() call below would fail.
+        # Each folder is now created independently and idempotently.
+        os.makedirs(newpath_u, exist_ok=True)
+        os.makedirs(newpath_d, exist_ok=True)
+
+        # Filter the requested channel "wishlist" down to what actually exists on
+        # this probe (auto-detection, works for Maestro, Concerto, or any other
+        # RBR probe). Channels not present (e.g. dissolved_o2_concentration, ph,
+        # chlorophyll-a, fdom, turbidity on a Concerto) are skipped with a log
+        # message instead of making RSK2CSV fail.
+        exported_param = channel_utils.filter_existing_channels(rsk_d, param)
+        skipped_param = channel_utils.missing_channels(rsk_d, param)
+        if skipped_param:
+            print(f"[INFO] Channel(s) requested but not present on this probe, "
+                  f"skipped for {os.path.basename(path_in)}: {skipped_param}")
 
         # save required variables in a csv with the correct format
-        # export down cast
-        rsk_d.RSK2CSV(
-            channels=param,  # list of parameters in argument
+        # export down cast (retry-wrapped: see _rsk2csv_with_retry() for why)
+        _rsk2csv_with_retry(
+            rsk_d,
+            channels=exported_param,  # filtered to what this probe actually has
             profiles=profile_nb,
             comment="down CAST",
-            outputDir=newpath_d,
+            output_dir=newpath_d,
         )
         # save export file name down cast because rsk2csv does not output it
         csv_d = rsk_to_profile_csv(newpath_d, 0)
 
         # export upcast
-        rsk_u.RSK2CSV(
-            channels=param,
+        _rsk2csv_with_retry(
+            rsk_u,
+            channels=exported_param,
             profiles=profile_nb,
             comment="up CAST",
-            outputDir=newpath_u,
+            output_dir=newpath_u,
         )
         # save export file name down cast because rsk2csv does not output it
         csv_u = rsk_to_profile_csv(newpath_u, 0)
@@ -715,11 +855,12 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out):
             file_output_folder,
             csv_d,
             csv_u,
+            exported_param,
         )
 
 
 # %% process_rsk_folder
-def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, param):
+def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, param, **rsk_kwargs):
     '''
     This function is to procees a list of files in a chosen folder and apply
     the function process_rsk_file on each file
@@ -742,7 +883,12 @@ def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, pa
         atmospheric pressure (dBar)
     param : List
         List of channel names that you want to keep in your processed RBR. csv
-        destination file
+        destination file. Treated as a wishlist: channels absent on a given
+        probe (e.g. Concerto without DO/fluorometer) are auto-skipped.
+    **rsk_kwargs :
+        optional per-probe tuning forwarded to procRSK(), e.g. ct_lag=,
+        cond_scale_factor=, cond_offset=, do_sensor_offset=. See procRSK()
+        docstring for details. Leave empty to keep the historical Maestro defaults.
 
     Returns
     -------
@@ -754,20 +900,35 @@ def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, pa
     # the processes_data in a proc_data dir
     # get the dir a step up
     # parent_dir = os.path.dirname(path_in)
+    
     path_out = os.path.join(path_in, "outputs")
     # creates the path_out directory woth proc_data if it don't already exists
     os.makedirs(path_out, exist_ok=True)
-
+    
     # Extract just the filenames from the list
-    rsk_filenames_from_list = {os.path.basename(path) for path in list_of_rsk}
+    # rsk_filenames_from_list = {os.path.basename(path) for path in list_of_rsk}
+    
     # List of all rsk files in target directory
-    all_files_in_dir = os.listdir(path_in)
-    # finding the matching rsk files between two lists
+    # all_files_in_dir = os.listdir(path_in)
+    
+    
+    '''
+    # finding the matching rsk files between two lists    
     valid_files_to_process = [
         os.path.join(path_in, f)
         for f in all_files_in_dir
         if f in rsk_filenames_from_list
     ]
+    
+    
+    print("list_of_rsk:", list_of_rsk)
+    print("rsk_filenames_from_list:", rsk_filenames_from_list)
+    print("all_files_in_dir:", all_files_in_dir)
+    print("valid_files_to_process:", valid_files_to_process)
+    '''
+    # no need to filter as done previously
+    valid_files_to_process = list_of_rsk
+    
     print("🔄 List of files to be processed:")
     valid_sorted = sort_files_by_yymmdd(
         valid_files_to_process
@@ -781,13 +942,14 @@ def process_rsk_folder(path_in, list_of_rsk, site_id, p_tresh, c_tresh, patm, pa
                                      1}/{len(valid_files_to_process)}: {input_file} ---"
         )
         rsksproc.process_rsk_file(
-            input_file, path_out, site_id, p_tresh, c_tresh, patm, param
+            input_file, path_out, site_id, p_tresh, c_tresh, patm, param,
+            **rsk_kwargs
         )
 
 
 # %% process_rsk_file
 #
-def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param):
+def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, param, **rsk_kwargs):
     '''
     This function does the processing on a single rsk file only. The rsk file
     is supposed to contain only one profile
@@ -810,8 +972,12 @@ def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, para
         atmospheric pressure (dBar)
     param : List
         List of channel names that you want to keep in your processed RBR. csv
-        destination file      
-
+        destination file. Treated as a wishlist: channels absent on this probe
+        (e.g. Concerto without DO/fluorometer) are auto-skipped for both the
+        CSV export and the plots.
+    **rsk_kwargs :
+        optional per-probe tuning forwarded to procRSK() (ct_lag, cond_scale_factor,
+        cond_offset, do_sensor_offset). Leave empty for the historical Maestro defaults.
 
     Returns
     -------
@@ -845,8 +1011,10 @@ def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, para
             file_output_folder,
             csv_d,
             csv_u,
+            exported_param,
         ) = rsksproc.procRSK(
-            input_file, patm, site_id, p_tresh, c_tresh, param, path_out
+            input_file, patm, site_id, p_tresh, c_tresh, param, path_out,
+            **rsk_kwargs
         )
 
         print(f"Output folder: {file_output_folder}")
@@ -854,10 +1022,13 @@ def process_rsk_file(input_file, path_out, site_id, p_tresh, c_tresh, patm, para
         print(f"Profile number: {profile_nb}")
 
         # Step 2: Plot
+        # Use exported_param (already filtered to what this specific probe has,
+        # e.g. no ph/chlorophyll-a/fdom/turbidity/DO on a Concerto) instead of
+        # the raw wishlist, so we never try to plot a channel that doesn't exist.
         exclude = ["pressure", "sea_pressure", "depth"]
-        for param in [x for x in param if x not in exclude]:
+        for p in [x for x in exported_param if x not in exclude]:
             rsksplt.plot_up_down2(
-                rsk_d, rsk_u, param, profile_nb, file_output_folder
+                rsk_d, rsk_u, p, profile_nb, file_output_folder
             )
 
         # Step 3: Convert to SOMLIT format
@@ -897,7 +1068,7 @@ def rsk_to_profile_csv(dir_path, profile_nb=0):
 
 # %% split_rsk_by_day
 
-def split_rsk_by_day(mrsk_file):
+def split_rsk_by_day(mrsk_file, output_dir):
     '''
     Function to process mrsk file. A mrsk file is a RSK file containing multiple somlit days in it.
     It comes because the RBR probe has been set on pause between the Somlits. Therefore several somlit days
@@ -908,6 +1079,8 @@ def split_rsk_by_day(mrsk_file):
     ----------
     mrsk_file : str
         Path to the multiple RSK file to split
+    output_dir : str
+        Directory adress to save the newly created rsk
 
     Returns
     -------
@@ -940,12 +1113,52 @@ def split_rsk_by_day(mrsk_file):
             day_str = str(day).replace("-", "")
 
             # Save the new RSK file
-            output_file = day_rsk.RSK2RSK(suffix=day_str)  # Writes the file
+            output_file = day_rsk.RSK2RSK(outputDir=output_dir, suffix=day_str)  # Writes the file
             created_files.append(output_file)
 
             print(f"✅ Saved: {output_file}")
 
         return created_files
+
+
+# %% toSomlitDB
+#
+
+
+# %% _read_text_lines_robust
+
+def _read_text_lines_robust(file_path):
+    '''
+    Read all lines of a text file, tolerating the fact that RBR's own CSV
+    export (RSK.RSK2CSV) writes files in Windows-1252, not UTF-8. Unit
+    symbols in the header/comment lines such as "kg/m³", "µmol/L", "°C" are
+    encoded as single bytes (e.g. 0xB3 for "³") that are not valid on their
+    own in UTF-8, causing:
+        UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb3 ...
+    when the file is opened with Python's default/UTF-8 text encoding.
+
+    This tries utf-8 first (harmless if the file happens to be plain ASCII),
+    then falls back to cp1252 (RBR's actual encoding), and finally latin-1
+    as a last resort (it can decode any byte, so it never raises).
+
+    Parameters
+    ----------
+    file_path : str
+        path to the text/csv file to read
+
+    Returns
+    -------
+    list of str
+        the lines of the file, as returned by f.readlines()
+    '''
+    for encoding in ("utf-8", "cp1252"):
+        try:
+            with open(file_path, "r", encoding=encoding) as f:
+                return f.readlines()
+        except UnicodeDecodeError:
+            continue
+    with open(file_path, "r", encoding="latin-1") as f:
+        return f.readlines()
 
 
 # %% toSomlitDB
@@ -973,8 +1186,9 @@ def toSomlitDB(file_path, site_id, output_file):
     None.
 
     '''
-    with open(file_path, "r") as f:
-        lines = f.readlines()
+    # NB: uses a robust reader because RBR's RSK2CSV export is written in
+    # cp1252, not UTF-8 (see _read_text_lines_robust docstring above).
+    lines = _read_text_lines_robust(file_path)
 
     # Step 2: Find the last line starting with '//'
     header_line_idx = None
@@ -990,6 +1204,7 @@ def toSomlitDB(file_path, site_id, output_file):
         skiprows=header_line_idx + 1,  # Skip all lines before actual data
         header=None,  # No header in data part
         engine="python",
+        encoding="cp1252",
     )
 
     # Step 4: Set the header from the last '//' line
@@ -1000,9 +1215,13 @@ def toSomlitDB(file_path, site_id, output_file):
     df = df.dropna()
 
     # Convert the first column to datetime using your format
-    df.iloc[:, 0] = pd.to_datetime(
-        df.iloc[:, 0], format="%Y-%m-%dT%H:%M:%S.%f"
-    )
+    # NB: assign via the column label (not .iloc) — recent pandas versions can
+    # infer this column as a strict StringDtype from read_csv, and in-place
+    # assignment through .iloc then raises "Invalid value for dtype 'str'"
+    # when handed datetime64 values. Assigning by label replaces the column
+    # (and its dtype) outright instead of mutating it in place.
+    first_col = df.columns[0]
+    df[first_col] = pd.to_datetime(df[first_col], format="%Y-%m-%dT%H:%M:%S.%f")
 
     # Set the first column as the index, and avoid warning caused
     # by aving diffrent object types in the index: str, numerical, etc...
@@ -1048,6 +1267,18 @@ def toSomlitDB(file_path, site_id, output_file):
         "SALINITE",
         "PROFONDEUR",
     ]
+
+    # The SOMLIT file format expects this fixed set of columns, but some probes
+    # don't carry every sensor (e.g. a Concerto has no fluorometer, so there is
+    # no FLUORESCENCE data). Rather than crash on a missing column, fill it with
+    # NaN so the export still runs and simply leaves that field empty.
+    missing_cols = [c for c in cols if c not in df.columns]
+    if missing_cols:
+        print(f"[INFO] Colonne(s) absente(s) (capteur non présent sur cette sonde), "
+              f"remplie(s) avec NaN dans l'export SOMLIT: {missing_cols}")
+        for c in missing_cols:
+            df[c] = np.nan
+
     df = df[cols]
 
     # Round to specific decimal numbers per channel for Somlit output file
@@ -1061,7 +1292,7 @@ def toSomlitDB(file_path, site_id, output_file):
     # 4. Prepare your multi-line header as a string
     header_lines = [
         "// SOMLIT somlit.fr;;;;;;;",
-        "// RBR processing IUEM;"
+        "// RBR processing IUEM/MEDIMEER;"
         + datetime.now().strftime("%Y-%m-%d;%H:%M:%S")
         + ";;;;;",  # current time of processing
         "ID_SITE;DATE;HEURE;TEMPERATURE;FLUORESCENCE;PAR;SALINITE;PROFONDEUR",
@@ -1070,11 +1301,19 @@ def toSomlitDB(file_path, site_id, output_file):
     ]
 
     # 5. Write the file with the custom header
-
-    with open(output_file, "w") as f:
-        # Write custom header lines
+    # - encoding="utf-8-sig": adds a UTF-8 BOM so Excel (Windows/French locale)
+    #   auto-detects UTF-8 instead of falling back to cp1252 and mangling
+    #   special characters like °, µ, ² in the units line.
+    # - newline="": prevents Python's universal-newline translation from
+    #   doubling up the line endings that pandas.to_csv() already writes
+    #   (the classic "blank line between every row" bug on Windows).
+    with open(output_file, "w", encoding="utf-8-sig", newline="") as f:
+        # Write custom header lines. Terminated with "\r\n" to match what
+        # pandas.to_csv() writes below for the data rows (its csv writer
+        # defaults to "\r\n" regardless of OS) — keeps the whole file on one
+        # consistent line-ending convention.
         for line in header_lines:
-            f.write(line + "\n")
+            f.write(line + "\r\n")
         # Write DataFrame to file with ; separator, no header (already written)
         df.to_csv(f, sep=";", index=False, header=False)
 

@@ -73,9 +73,13 @@ The author would like to thank Mathieu Dever, RBR chief scientist for sharing hi
    ```
 3. Create the conda environment from the provided environment.yml file provided. This file contains all packages and dependencies you need to run the code.
 **Be aware the pyrsktools pacakge is not in the .yml and must be installed via pip install.**   
+For Linux geeks:
     ```bash
     conda env create -f environment.yml
     ```
+For Windows users:
+use this environment file (Thanks A. Domeau): environment_win.yml
+
 4. Activate the conda environement
     ```bash
     conda activate myenv

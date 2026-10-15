@@ -218,6 +218,14 @@ def plot_up_down2(rsk_d, rsk_u, param, profile_nb, save_path=None):
     # Merge into a single figure
     fig, axes = rsk_d.mergeplots([fig1, axes1], [fig2, axes2])
 
+    # fig1/fig2 are no longer needed once merged into fig; close them to avoid
+    # accumulating dozens of open figures when this function is called in a
+    # loop over many channels/profiles (matplotlib will otherwise warn/leak
+    # memory after ~20 open figures).
+    for f in (fig1, fig2):
+        if f is not fig:
+            plt.close(f)
+
     for ax in axes:
         lines = ax.get_lines()
         if len(lines) < 2:
@@ -292,6 +300,18 @@ def plot_up_down2(rsk_d, rsk_u, param, profile_nb, save_path=None):
 
         plt.savefig(save_filename, dpi=150, bbox_inches='tight')
 
-    plt.show()
+        # IMPORTANT: this function is called in a loop over every channel and
+        # every profile from process_rsk_file() (batch/automation mode).
+        # plt.show() can block script execution until the figure window is
+        # manually closed, depending on the matplotlib backend — which looks
+        # exactly like the script being "frozen" doing nothing when
+        # processing several files. Since the figure is already saved to disk
+        # above, we close it instead of showing it, so the batch run never
+        # waits on user interaction.
+        plt.close(fig)
+    else:
+        # No save_path: assume interactive/exploratory use (single plot call
+        # from a notebook/console), keep the original blocking behaviour.
+        plt.show()
 
     return fig, axes

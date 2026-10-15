@@ -3,8 +3,10 @@
 """
 Script file name: diff_RBR_SBE.py
 Author: Etienne Poirier, IRD, Plouzané
+Modified: Aurélien DOMEAU, CNRS, Sète
+
 Date created: 2025-06-30
-Last update: 2026-01-09
+Last update: 2026-07-16
 Description: various functions to plot comparison graphs
 between RBR and SBE data profiles (marine probes)
 """
@@ -14,7 +16,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.ticker as ticker
 import os
+import glob
 import warnings
+from collections import defaultdict
 
 # warnings format for warnings messages to be visible
 warnings.simplefilter("always", UserWarning)
@@ -104,6 +108,125 @@ def parse_somlit_file(filepath):
     return df
 
 
+# %% read_somlit_csv
+
+def read_somlit_csv(filepath, site_id_filter=None):
+    '''
+    Generic reader for a SOMLIT-format CSV, whatever produced it: our own
+    RBR pipeline (RSKsomlit_proc.toSomlitDB) or a partner lab's SBE profile
+    already converted to the SOMLIT layout. Both share the same shape: a
+    few comment lines (any prefix, "//" or "#"), a header row starting with
+    "ID_SITE", then ";"-separated data rows.
+
+    Unlike parse_somlit_file() above (which assumes exactly one "units" row
+    right after the header, true for our RBR output but NOT for a plain SBE
+    file where data starts immediately after the header, and would silently
+    delete the first real data row), this reader discards non-data rows
+    generically: any row whose ID_SITE doesn't parse as a number (units row,
+    blank ";;;;;;;", ...) is dropped, regardless of how many such rows exist
+    or where they sit.
+
+    It also auto-detects the DATE format per file: our RBR output writes
+    ISO "YYYY-MM-DD", while the example SBE file uses "DD-MM-YYYY". Note
+    this can NOT be done with pandas' generic dayfirst=True, which silently
+    mis-parses an unambiguous ISO date like "2026-05-06" as if day/month
+    were swapped whenever both are <=12.
+
+    Parameters
+    ----------
+    filepath : str
+        path to the Somlit-format csv file (RBR or SBE)
+    site_id_filter : int, optional
+        if given, keep only rows whose ID_SITE matches this value
+
+    Returns
+    -------
+    df : dataframe
+        indexed by DATETIME, with a "DATE" column (python date objects,
+        one calendar date per profile) usable for matching RBR vs SBE files
+    '''
+    lines = _read_text_lines_robust(filepath)
+
+    header_idx = None
+    for idx, line in enumerate(lines):
+        if line.split(";")[0].strip() == "ID_SITE":
+            header_idx = idx
+            break
+    if header_idx is None:
+        raise ValueError(
+            f"Ligne d'en-tête 'ID_SITE;...' introuvable dans {filepath}")
+
+    column_names = lines[header_idx].strip().split(";")
+
+    df = pd.read_csv(
+        filepath,
+        sep=";",
+        skiprows=header_idx + 1,
+        header=None,
+        names=column_names,
+        engine="python",
+        encoding="cp1252",
+    )
+
+    # Drop any non-data row (units row, blank separator row...): a genuine
+    # data row always has a numeric ID_SITE.
+    df["ID_SITE"] = pd.to_numeric(df["ID_SITE"], errors="coerce")
+    df = df.dropna(subset=["ID_SITE"]).reset_index(drop=True)
+
+    if df.empty:
+        return df
+
+    # Make sure every value column is numeric (they can come back as object
+    # dtype since the raw read mixed in non-numeric junk rows above)
+    for col in df.columns:
+        if col not in ("DATE", "HEURE"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Detect DATE format from the first row: 4-digit first token -> ISO
+    # (our RBR output), otherwise DD-MM-YYYY (SBE-style)
+    first_date = str(df["DATE"].iloc[0])
+    if len(first_date.split("-")[0]) == 4:
+        date_format = "%Y-%m-%d"
+    else:
+        date_format = "%d-%m-%Y"
+
+    df["DATETIME"] = pd.to_datetime(
+        df["DATE"] + " " + df["HEURE"],
+        format=f"{date_format} %H:%M:%S",
+    )
+    df["DATE"] = pd.to_datetime(df["DATE"], format=date_format).dt.date
+
+    df = df.set_index("DATETIME").sort_index()
+
+    if site_id_filter is not None:
+        df = df[df["ID_SITE"] == site_id_filter]
+
+    return df
+
+
+def _read_text_lines_robust(file_path):
+    '''
+    Read all lines of a text file, tolerating the fact that RBR's own CSV
+    export (RSK.RSK2CSV) writes files in Windows-1252, not UTF-8. Unit
+    symbols in the header/comment lines such as "kg/m³", "µmol/L", "°C" are
+    single bytes (e.g. 0xB3 for "³") that are invalid on their own in UTF-8,
+    which raises:
+        UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb3 ...
+    when the file is opened with Python's default/UTF-8 text encoding.
+
+    Tries utf-8 first, falls back to cp1252 (RBR's actual encoding), and
+    finally latin-1 as a last resort (never raises, decodes every byte).
+    '''
+    for encoding in ("utf-8", "cp1252"):
+        try:
+            with open(file_path, "r", encoding=encoding) as f:
+                return f.readlines()
+        except UnicodeDecodeError:
+            continue
+    with open(file_path, "r", encoding="latin-1") as f:
+        return f.readlines()
+
+
 # %% read_RBR_csv
 
 def read_RBR_csv(file_path):
@@ -122,8 +245,9 @@ def read_RBR_csv(file_path):
         Dataframe withe the data properly stored to be used later  
     '''
 
-    with open(file_path, "r") as f:
-        lines = f.readlines()
+    # NB: robust reader because RBR's RSK2CSV export is written in cp1252,
+    # not UTF-8 (see _read_text_lines_robust docstring above).
+    lines = _read_text_lines_robust(file_path)
 
     # Step 2: Find the last line starting with '//'
     header_line_idx = None
@@ -138,7 +262,8 @@ def read_RBR_csv(file_path):
         sep=',    ',
         skiprows=header_line_idx + 1,     # Skip all lines before actual data
         header=None,                      # No header in data part
-        engine="python"
+        engine="python",
+        encoding="cp1252",
     )
 
     # Step 4: Set the header from the last '//' line
@@ -149,8 +274,10 @@ def read_RBR_csv(file_path):
     df = df.dropna()
 
     # Convert the first column to datetime using your format
-    df.iloc[:, 0] = pd.to_datetime(
-        df.iloc[:, 0], format='%Y-%m-%dT%H:%M:%S.%f')
+    # NB: assign via the column label (not .iloc), see RSKsomlit_proc.toSomlitDB
+    # for why (recent pandas StringDtype inference + strict .iloc setitem).
+    first_col = df.columns[0]
+    df[first_col] = pd.to_datetime(df[first_col], format='%Y-%m-%dT%H:%M:%S.%f')
 
     # Set the first column as the index, and avoid warning caused
     # by aving diffrent object types in the index: str, numerical, etc...
@@ -315,7 +442,7 @@ def plot_and_save_comparisons_all_columns(df_sbe, df_rbr, depth_col='depth(m)', 
         col for col in df_rbr.columns
         if col in df_sbe.columns
         and col != depth_col
-        and np.issubdtype(df_rbr[col].dtype, np.number)
+        and pd.api.types.is_numeric_dtype(df_rbr[col])
     ]
 
     if not common_cols:
@@ -431,7 +558,7 @@ def plot_comparisons_up_down(
         col for col in df_rbr_down.columns
         if col in df_sbe_down.columns
         and col != depth_col
-        and np.issubdtype(df_rbr_down[col].dtype, np.number)
+        and pd.api.types.is_numeric_dtype(df_rbr_down[col])
     ]
 
     if not common_cols:
@@ -513,3 +640,186 @@ def plot_comparisons_up_down(
         plt.close(fig)
 
         print(f"✅ Saved: {fig_path_profile} and {fig_path_diff}")
+
+
+# %% find_rbr_somlit_files
+
+def find_rbr_somlit_files(rbr_root):
+    '''
+    Recursively find every RBR-produced Somlit CSV under rbr_root (typically
+    proc_data/outputs/), i.e. every file matching "*_4somlit_*.csv" as
+    written by RSKsomlit_proc.toSomlitDB() (one per downcast/upcast/profile).
+
+    Parameters
+    ----------
+    rbr_root : str
+        root folder to search recursively (e.g. proc_data/outputs)
+
+    Returns
+    -------
+    list of str
+        sorted list of matching file paths
+    '''
+    return sorted(glob.glob(os.path.join(rbr_root, "**", "*_4somlit_*.csv"),
+                             recursive=True))
+
+
+# %% find_sbe_files
+
+def find_sbe_files(sbe_root):
+    '''
+    Find every SBE csv file directly inside sbe_root (e.g. SBE_completed/),
+    already in the Somlit-like layout provided by the partner lab.
+
+    Parameters
+    ----------
+    sbe_root : str
+        folder containing the SBE csv files (not searched recursively)
+
+    Returns
+    -------
+    list of str
+        sorted list of matching file paths
+    '''
+    return sorted(glob.glob(os.path.join(sbe_root, "*.csv")))
+
+
+# %% match_rbr_sbe_by_date
+
+def match_rbr_sbe_by_date(rbr_root, sbe_root):
+    '''
+    Scan rbr_root for RBR Somlit CSVs and sbe_root for SBE Somlit CSVs, read
+    each one, and group them by calendar date (the DATE of their first data
+    row). Returns one entry per date found in BOTH sources, ready to be
+    compared pairwise.
+
+    A file that fails to parse (unexpected format, empty after cleaning...)
+    is skipped with a [WARNING], not fatal to the rest of the run.
+
+    Parameters
+    ----------
+    rbr_root : str
+        root folder to search recursively for RBR Somlit CSVs
+    sbe_root : str
+        folder to search (non-recursively) for SBE Somlit CSVs
+
+    Returns
+    -------
+    list of dict
+        one dict per matching date: {"date": date,
+                                      "rbr": [(filepath, df), ...],
+                                      "sbe": [(filepath, df), ...]}
+        sorted by date
+    '''
+    rbr_by_date = defaultdict(list)
+    sbe_by_date = defaultdict(list)
+
+    for f in find_rbr_somlit_files(rbr_root):
+        try:
+            df = read_somlit_csv(f)
+            if df.empty:
+                print(f"[WARNING] {f} ne contient aucune ligne de donnée exploitable, ignoré.")
+                continue
+            rbr_by_date[df["DATE"].iloc[0]].append((f, df))
+        except Exception as e:
+            print(f"[WARNING] Impossible de lire {f} comme CSV Somlit RBR: {e}")
+
+    for f in find_sbe_files(sbe_root):
+        try:
+            df = read_somlit_csv(f)
+            if df.empty:
+                print(f"[WARNING] {f} ne contient aucune ligne de donnée exploitable, ignoré.")
+                continue
+            sbe_by_date[df["DATE"].iloc[0]].append((f, df))
+        except Exception as e:
+            print(f"[WARNING] Impossible de lire {f} comme CSV Somlit SBE: {e}")
+
+    common_dates = sorted(set(rbr_by_date) & set(sbe_by_date))
+
+    if not common_dates:
+        print("❌ Aucune date commune trouvée entre les fichiers RBR et SBE.")
+    else:
+        print(f"📅 {len(common_dates)} date(s) commune(s) trouvée(s): "
+              f"{[str(d) for d in common_dates]}")
+
+    return [
+        {"date": d, "rbr": rbr_by_date[d], "sbe": sbe_by_date[d]}
+        for d in common_dates
+    ]
+
+
+# %% compare_all_matching_dates
+
+def compare_all_matching_dates(rbr_root, sbe_root, save_folder="figures_comparison_SBE_RBR"):
+    '''
+    Main entry point: automatically find every (RBR Somlit csv, SBE Somlit
+    csv) pair that shares the same calendar date, and produce comparison
+    plots (profile overlay + difference, per common physical parameter) for
+    each pair. If a date has several RBR files (e.g. downcast AND upcast)
+    and/or several SBE files, every RBR/SBE combination for that date is
+    compared.
+
+    Comparisons are made only on columns common to both files (typically
+    TEMPERATURE, FLUORESCENCE, PAR, SALINITE — TURBIDITE when the RBR side
+    also has it, which isn't the case for a Maestro without a fluorometer/
+    turbidity sensor exported, or a Concerto). ID_SITE is excluded from the
+    comparison (it's a station identifier, not a physical measurement).
+
+    A mismatched ID_SITE between a paired RBR/SBE file (same date, different
+    station) is reported as a [WARNING] but does not block the comparison -
+    review it if it happens, it may mean two different stations happened to
+    be sampled the same day.
+
+    Parameters
+    ----------
+    rbr_root : str
+        root folder to search recursively for RBR Somlit CSVs (e.g.
+        proc_data/outputs)
+    sbe_root : str
+        folder containing the SBE Somlit CSVs (e.g. SBE_completed)
+    save_folder : str, optional
+        root folder where comparison figures are saved, one subfolder per
+        date. Default "figures_comparison_SBE_RBR".
+
+    Returns
+    -------
+    None
+    '''
+    matches = match_rbr_sbe_by_date(rbr_root, sbe_root)
+
+    for entry in matches:
+        date = entry["date"]
+        date_str = date.strftime("%Y-%m-%d")
+
+        for rbr_path, df_rbr in entry["rbr"]:
+            # "_4somlit_d.csv" -> downcast, "_4somlit_u.csv" -> upcast
+            cast = "downcast" if rbr_path.endswith("_d.csv") else \
+                   "upcast" if rbr_path.endswith("_u.csv") else "profile"
+            rbr_label = os.path.splitext(os.path.basename(rbr_path))[0]
+
+            for sbe_path, df_sbe in entry["sbe"]:
+                sbe_label = os.path.splitext(os.path.basename(sbe_path))[0]
+
+                rbr_site = df_rbr["ID_SITE"].iloc[0]
+                sbe_site = df_sbe["ID_SITE"].iloc[0]
+                if rbr_site != sbe_site:
+                    print(f"[WARNING] {date_str}: ID_SITE différent entre "
+                          f"RBR ({rbr_label}, site {rbr_site}) et SBE "
+                          f"({sbe_label}, site {sbe_site}) — comparaison "
+                          f"effectuée quand même, à vérifier.")
+
+                print(f"\n🔎 Comparaison {date_str} [{cast}]: "
+                      f"{rbr_label}  vs  {sbe_label}")
+
+                pair_folder = os.path.join(
+                    save_folder, date_str, f"{rbr_label}_vs_{sbe_label}"
+                )
+
+                # ID_SITE isn't a physical measurement - drop it from the
+                # comparison so it isn't plotted as if it were a channel.
+                plot_and_save_comparisons_all_columns(
+                    df_sbe.drop(columns=["ID_SITE"], errors="ignore"),
+                    df_rbr.drop(columns=["ID_SITE"], errors="ignore"),
+                    depth_col="PROFONDEUR",
+                    save_folder=pair_folder,
+                )

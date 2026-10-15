@@ -4,6 +4,7 @@
 Created on Thu Jun 19 11:21:52 2025
 
 @author: epoirier
+modified: adomeau
 """
 
 # Site IDs and correponding latitudes, names, list of dictionnaries
@@ -39,3 +40,45 @@ sites = [
     {"id": 19, "station": "Dinard", "latitude": 48.6333}, # Bizeux
     {"id": 22 , "station": "Sete", "latitude": 43.3267}, # Sete
     ]
+
+
+# %% get_site
+
+def get_site(site_id):
+    '''
+    Retourne le dictionnaire du site correspondant à site_id, en recherchant
+    par la clé "id" (le vrai identifiant Somlit du site), PAS par position
+    dans la liste `sites`.
+
+    BUGFIX: le code appelait auparavant directement `sites.sites[site_id]`,
+    ce qui utilisait site_id comme un INDICE DE LISTE. Comme la liste n'est
+    pas triée/dense par id, ça retournait silencieusement le mauvais site
+    (site_id=5 renvoyait "Banyuls" au lieu de "Brest", par coïncidence sans
+    erreur) et plantait carrément avec IndexError dès que site_id dépassait
+    la longueur de la liste (ex: site_id=22 -> "list index out of range",
+    alors que Sète est bien dans la liste, juste pas à la position 22).
+
+    Parameters
+    ----------
+    site_id : int
+        identifiant Somlit du site, cf. la clé "id" dans la liste `sites`
+
+    Returns
+    -------
+    dict
+        le dictionnaire {"id", "station", "latitude"} du site demandé
+
+    Raises
+    ------
+    ValueError
+        si site_id ne correspond à aucune entrée de `sites`
+    '''
+    for site in sites:
+        if site["id"] == site_id:
+            return site
+
+    valid_ids = [site["id"] for site in sites]
+    raise ValueError(
+        f"site_id={site_id} introuvable dans sites.py. "
+        f"IDs valides: {valid_ids}"
+    )

@@ -1284,7 +1284,7 @@ def toSomlitDB(file_path, site_id, output_file):
     # Round to specific decimal numbers per channel for Somlit output file
 
     df["TEMPERATURE"] = df["TEMPERATURE"].round(4)
-    df["FLUORESCENCE"] = df["FLUORESCENCE"].round(0)
+    df["FLUORESCENCE"] = df["FLUORESCENCE"].round(3)
     df["PAR"] = df["PAR"].round(3)
     df["SALINITE"] = df["SALINITE"].round(4)
     df["PROFONDEUR"] = df["PROFONDEUR"].round(2)

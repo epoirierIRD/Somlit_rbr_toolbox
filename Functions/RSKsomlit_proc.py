@@ -23,9 +23,11 @@ import glob
 from pathlib import Path
 from collections import defaultdict
 import re
+import gsw
 
 # custom lib
 import sites
+import processing_config as cfg
 import RSKsomlit_proc as rsksproc
 import RSKsomlit_plt as rsksplt
 import channel_utils
@@ -455,9 +457,151 @@ def _rsk2csv_with_retry(rsk_obj, channels, profiles, comment, output_dir,
     raise last_err
 
 
+# %% C-T lag: estimation and resolution
+
+def _ct_lag_default_for_probe(rsk):
+    """
+    Return the fallback C-T lag (s, alignchannel convention) for the probe
+    model of this rsk, from processing_config.CT_LAG_PROBE_DEFAULTS.
+    """
+    model = str(getattr(rsk.instrument, "model", "") or "").lower()
+    for prefix, lag in cfg.CT_LAG_PROBE_DEFAULTS.items():
+        if model.startswith(prefix.lower()):
+            return float(lag)
+    return float(cfg.CT_LAG_DEFAULT_S)
+
+
+def _sample_period_s(rsk):
+    """
+    Return the sampling period (s) of the rsk, from its schedule metadata,
+    or from the median time step of the data if the metadata is missing.
+    """
+    period_ms = getattr(rsk.scheduleInfo, "samplingPeriod", None)
+    if period_ms:
+        return float(period_ms) / 1000.0
+    dt = np.diff(rsk.data["timestamp"]) / np.timedelta64(1, "s")
+    return float(np.median(dt))
+
+
+def estimate_ct_lag(rsk, profile_nb, direction="down"):
+    """
+    Estimate the thermistor lag relative to the conductivity cell on one
+    cast, by minimising salinity spikiness.
+
+    For each candidate lag L (whole sample periods between
+    CT_LAG_SEARCH_MIN_S and CT_LAG_SEARCH_MAX_S), salinity is recomputed with
+    temperature read L seconds later, S = SP(C(t), T(t + L), p(t)), and its
+    spikiness is the standard deviation of S minus its running median
+    (window CT_LAG_SPIKE_WINDOW samples), using only samples deeper than
+    CT_LAG_MIN_PRESSURE_DBAR. The lag with the lowest spikiness wins.
+
+    The search is done in whole samples because the lag cannot be resolved
+    below one sample period: linear interpolation between samples always
+    makes the minimum fall on a whole sample.
+
+    Must be called after deriveseapressure(), computeprofiles() and
+    correcthold(), and before alignchannel() / derivesalinity().
+
+    Parameters
+    ----------
+    rsk : RSK object
+    profile_nb : int
+        profile of interest (see find_profile())
+    direction : str
+        cast used for the estimate ("down" by default, SOMLIT practice)
+
+    Returns
+    -------
+    lag_s : float or None
+        lag to pass to alignchannel(channel="temperature", lagunits="seconds")
+        (negative = temperature shifted earlier). None if no reliable
+        estimate (too few samples, no gradient, or not enough improvement).
+    diagnostics : dict
+        candidate lags (s), spikiness for each, sample period, n samples
+    """
+    period = _sample_period_s(rsk)
+    idx = rsk.getprofilesindices(profiles=profile_nb, direction=direction)[0]
+    data = rsk.data[idx]
+    pres = data["sea_pressure"]
+    mask = np.isfinite(pres) & (pres > cfg.CT_LAG_MIN_PRESSURE_DBAR)
+    diagnostics = {"sample_period_s": period, "n_samples": int(mask.sum())}
+
+    if mask.sum() < 3 * cfg.CT_LAG_SPIKE_WINDOW:
+        return None, diagnostics
+
+    time_s = (data["timestamp"] - data["timestamp"][0]) / np.timedelta64(1, "s")
+    cond = data["conductivity"]
+    temp = data["temperature"]
+
+    n_min = int(np.ceil(cfg.CT_LAG_SEARCH_MIN_S / period - 1e-9))
+    n_max = int(np.floor(cfg.CT_LAG_SEARCH_MAX_S / period + 1e-9))
+    candidates = np.arange(n_min, n_max + 1) * period
+
+    spikiness = []
+    for lag in candidates:
+        temp_shifted = np.interp(time_s + lag, time_s, temp)
+        sal = gsw.SP_from_C(cond, temp_shifted, pres)
+        ref = pd.Series(sal).rolling(cfg.CT_LAG_SPIKE_WINDOW, center=True,
+                                     min_periods=1).median().to_numpy()
+        spikiness.append(float(np.nanstd((sal - ref)[mask])))
+    spikiness = np.array(spikiness)
+
+    diagnostics["candidates_s"] = candidates.tolist()
+    diagnostics["spikiness"] = spikiness.tolist()
+
+    best = int(np.nanargmin(spikiness))
+    no_lag = np.flatnonzero(np.isclose(candidates, 0.0))
+    if no_lag.size:
+        ref_spk = spikiness[no_lag[0]]
+        improvement = (ref_spk - spikiness[best]) / ref_spk if ref_spk > 0 else 0.0
+        diagnostics["improvement"] = float(improvement)
+        if candidates[best] != 0 and improvement < cfg.CT_LAG_MIN_IMPROVEMENT:
+            return None, diagnostics
+
+    # alignchannel convention: negative lag shifts temperature earlier
+    return -float(candidates[best]), diagnostics
+
+
+def resolve_ct_lag(rsk, profile_nb, ct_lag=None):
+    """
+    Decide which C-T lag to apply to this profile.
+
+    Parameters
+    ----------
+    ct_lag : None, "auto" or float
+        None  -> processing_config.CT_LAG_MODE is used
+        "auto"-> estimate_ct_lag(), fallback to the probe default
+        float -> fixed lag in seconds (alignchannel convention)
+
+    Returns
+    -------
+    lag_s : float
+    source : str
+        "fixed", "auto" or "probe default" (for logs and metadata)
+    """
+    if ct_lag is None:
+        ct_lag = cfg.CT_LAG_MODE
+    if ct_lag is None:
+        return _ct_lag_default_for_probe(rsk), "probe default"
+    if isinstance(ct_lag, str):
+        if ct_lag.lower() != "auto":
+            raise ValueError(f"ct_lag must be None, 'auto' or a number, got {ct_lag!r}")
+        lag, diag = estimate_ct_lag(rsk, profile_nb)
+        if lag is None:
+            fallback = _ct_lag_default_for_probe(rsk)
+            print(f"[WARNING] C-T lag estimate not reliable ({diag}); "
+                  f"using probe default {fallback} s.")
+            return fallback, "probe default"
+        if -lag >= cfg.CT_LAG_SEARCH_MAX_S - 1e-9:
+            print(f"[WARNING] C-T lag estimate hit the search limit "
+                  f"({cfg.CT_LAG_SEARCH_MAX_S} s); check the profile.")
+        return lag, "auto"
+    return float(ct_lag), "fixed"
+
+
 # %% *** procRSK ***
 def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out,
-            ct_lag=-0.045, cond_scale_factor=1.000000, cond_offset=0,
+            ct_lag=None, cond_scale_factor=1.000000, cond_offset=0,
             do_sensor_offset=0.472):
     """
     This function is to process a raw rsk file containing one single SOMLIT 
@@ -490,10 +634,12 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out,
         on a Concerto) are automatically skipped instead of raising an error.
     path_out : str
         Location path to the output folder of your choice for the processed data
-    ct_lag : float, optional
+    ct_lag : None, "auto" or float, optional
         time lag (s) applied to the temperature channel to realign it with
-        conductivity (sensor response time mismatch). Default is the value
-        historically used for the Maestro (-0.045 s). Adjust per probe if needed.
+        conductivity (sensor response time mismatch), alignchannel
+        convention (negative = temperature shifted earlier).
+        None (default) uses processing_config.CT_LAG_MODE; "auto" estimates
+        it on the downcast (see estimate_ct_lag()); a number forces it.
     cond_scale_factor : float, optional
         scale factor (SF) applied to conductivity to correct for sensor proximity
         effects. Default 1.0 (no correction).
@@ -568,17 +714,15 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out,
             print(f"[INFO] No DO sensor (dissolved_o2_concentration + temperature1) "
                   f"detected on {os.path.basename(path_in)} — DO compensation will be skipped.")
 
-        # Low-pass filtering, windowlength is the number of values to use to calculate an average
-        # We run at 2Hz, it is slower than the RBR (4Hz) so we won't apply any filter
-        # rsk.smooth(channels = ["temperature"], windowLength = 5)
-
-        # realignement CT (M. Dever)
-        # time lag of the temperature sensor that is slower than the conductivity sensor
-        # we talk about sensitivity speed with water changes
-        deltat = ct_lag  # in second, per-probe tunable (see procRSK parameters)
-        # Select the channel to be corrected
-        var = "temperature"
-        rsk.alignchannel(channel=var, lag=deltat, lagunits="seconds")
+        # C-T realignment (M. Dever, Halverson et al. 2017)
+        # The thermistor is slower than the conductivity cell: without this
+        # correction salinity spikes in the thermocline. The lag is resolved
+        # per profile (fixed, per-probe default or automatic estimate, see
+        # processing_config.py) and written to the processing log.
+        deltat, lag_source = resolve_ct_lag(rsk, profile_nb, ct_lag)
+        print(f"C-T lag applied to temperature: {deltat:+.3f} s ({lag_source}, "
+              f"sample period {_sample_period_s(rsk):.3f} s)")
+        rsk.alignchannel(channel="temperature", lag=deltat, lagunits="seconds")
 
         # Sensor proximity effect on conductivity (M. Dever)
         # Apply potential known proximity effect correction to conductivity

@@ -169,9 +169,10 @@ def main():
         # values, so this line can simply be omitted for Maestro-only
         # processing). For a Concerto (no DO sensor), do_sensor_offset is
         # simply unused since the whole DO-compensation block is skipped
-        # automatically. Adjust ct_lag here if the Concerto's C/T sensor
-        # pair has a different response-time mismatch than the Maestro's.
-        # ct_lag=-0.045,
+        # automatically. The C-T lag is set in Parameters/processing_config.py
+        # (CT_LAG_MODE: "auto" estimate per profile, per-probe defaults).
+        # Pass ct_lag=<seconds> here only to force one value for all files.
+        # ct_lag=-0.5,
         # cond_scale_factor=1.0,
         # cond_offset=0,
         # do_sensor_offset=0.472,

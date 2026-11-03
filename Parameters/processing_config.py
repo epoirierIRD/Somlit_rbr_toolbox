@@ -57,6 +57,16 @@ CT_LAG_SPIKE_WINDOW = 7
 # no correction. Avoids applying a random lag on profiles with no gradient.
 CT_LAG_MIN_IMPROVEMENT = 0.10
 
+# If salinity spikiness without any lag is already below this value (PSU),
+# the profile has no usable gradient: the lag cannot be estimated and does
+# not matter, so the probe default is used (e.g. homogeneous winter profile).
+CT_LAG_MIN_SPIKINESS_PSU = 0.005
+
+# Among lags whose spikiness is within this relative tolerance of the best
+# one, the smallest lag is kept (avoids picking a large lag on a flat
+# minimum).
+CT_LAG_TOLERANCE = 0.05
+
 # Fallback / fixed lag per instrument model, in seconds (alignchannel
 # convention, negative = shift temperature earlier). Keys are matched as a
 # case-insensitive prefix of rsk.instrument.model ("RBRconcerto³" ...).

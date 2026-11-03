@@ -549,10 +549,15 @@ def estimate_ct_lag(rsk, profile_nb, direction="down"):
     diagnostics["candidates_s"] = candidates.tolist()
     diagnostics["spikiness"] = spikiness.tolist()
 
-    best = int(np.nanargmin(spikiness))
+    # smallest lag whose spikiness is within CT_LAG_TOLERANCE of the minimum
+    best_spk = np.nanmin(spikiness)
+    best = int(np.flatnonzero(spikiness <= best_spk * (1 + cfg.CT_LAG_TOLERANCE))[0])
     no_lag = np.flatnonzero(np.isclose(candidates, 0.0))
     if no_lag.size:
         ref_spk = spikiness[no_lag[0]]
+        if ref_spk < cfg.CT_LAG_MIN_SPIKINESS_PSU:
+            diagnostics["reason"] = "no salinity gradient to estimate the lag"
+            return None, diagnostics
         improvement = (ref_spk - spikiness[best]) / ref_spk if ref_spk > 0 else 0.0
         diagnostics["improvement"] = float(improvement)
         if candidates[best] != 0 and improvement < cfg.CT_LAG_MIN_IMPROVEMENT:
@@ -589,7 +594,8 @@ def resolve_ct_lag(rsk, profile_nb, ct_lag=None):
         lag, diag = estimate_ct_lag(rsk, profile_nb)
         if lag is None:
             fallback = _ct_lag_default_for_probe(rsk)
-            print(f"[WARNING] C-T lag estimate not reliable ({diag}); "
+            print(f"[WARNING] C-T lag not estimated "
+                  f"({diag.get('reason', 'too few samples or no improvement')}); "
                   f"using probe default {fallback} s.")
             return fallback, "probe default"
         if -lag >= cfg.CT_LAG_SEARCH_MAX_S - 1e-9:
@@ -722,7 +728,18 @@ def procRSK(path_in, patm, site_id, p_tresh, c_tresh, param, path_out,
         deltat, lag_source = resolve_ct_lag(rsk, profile_nb, ct_lag)
         print(f"C-T lag applied to temperature: {deltat:+.3f} s ({lag_source}, "
               f"sample period {_sample_period_s(rsk):.3f} s)")
-        rsk.alignchannel(channel="temperature", lag=deltat, lagunits="seconds")
+        # Restricted to the profile of interest: spurious short "profiles"
+        # (dips before the cast) can be shorter than the lag and make
+        # alignchannel() raise "Time lag must be smaller than profile time length".
+        try:
+            rsk.alignchannel(channel="temperature", lag=deltat, lagunits="seconds",
+                             profiles=profile_nb)
+        except ValueError as e:
+            # e.g. an upcast shorter than the lag: align the downcast only
+            print(f"[WARNING] alignchannel on both casts failed ({e}); "
+                  f"aligning the downcast only, upcast left unaligned.")
+            rsk.alignchannel(channel="temperature", lag=deltat, lagunits="seconds",
+                             profiles=profile_nb, direction="down")
 
         # Sensor proximity effect on conductivity (M. Dever)
         # Apply potential known proximity effect correction to conductivity

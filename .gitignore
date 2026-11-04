@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Generated outputs (re-created by main_process.py / main_SBE_rbr_compar.py)
+proc_data/*.rsk
+proc_data/outputs/
+figures_comparaison_SBE_RBR/
+
+# Raw instrument data: keep local, only reference files are versioned explicitly
+raw_data/*
+!raw_data/rbr_concerto.rsk
+!raw_data/rbr_maestro.rsk
+raw_data/traitees/
+
+# Editor / OS / misc
+.Rhistory
+.spyproject/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

@@ -33,8 +33,10 @@ The author would like to thank Mathieu Dever, RBR chief scientist for sharing hi
 - **channel_utils.py**: helper functions to auto-detect which channels are actually present on a given probe, and resolve a logical channel name to its real one - this is what makes the toolbox work transparently with Maestro, Concerto, or any other RBR probe without editing code per probe type
 - **diff_RBR_SBE.py**: functions to read Somlit-format CSVs (both our own RBR output and third-party SBE files) and automatically compare them by matching date
 - **sensor_uncertainties.py** is a ressource file containing the sensor uncertainties for each channel used to show the error bars in the plots
+- **processing_config.py** holds the tunable processing settings, starting with the conductivity-temperature (C-T) lag (`CT_LAG_MODE`, per-probe defaults, search range of the automatic estimate)
 - **sites.py** is the list of SOMLIT sites with corresponding Lat, Lon used in the processing, plus a `get_site(site_id)` lookup function
 - **main_process.py** is the script to run to process every `.rsk` file found in the `raw_data` folder (not limited to a single hardcoded file name), with an interactive prompt to choose the SOMLIT site ID
+- **main_evaluate_ct_lag.py** reprocesses every `.rsk` of `raw_data/` with the historical fixed C-T lag and with the current configuration, and measures the RBR - SBE salinity difference for every date found in `SBE_completed/` (downcasts only). Results in `figures_comparaison_SBE_RBR/evaluation_ct_lag/`
 - **main_SBE_rbr_compar.py** is the script that automatically compares the Somlit CSVs produced by `main_process.py` (under `proc_data/outputs/`) against SBE Somlit CSVs deposited in `SBE_completed/`, pairing files up by matching date
 - **raw_data** is a folder containing the raw `.rsk` file(s) to process.
     `rbr_maestro.rsk` contains a profile from Lanveoc (14/10/2025) and 2 profiles from Ste Anne du Porzic (16/10/2025)
@@ -77,6 +79,21 @@ The author would like to thank Mathieu Dever, RBR chief scientist for sharing hi
 - Custom functions have been developped to avoid opening Ruskin GUI and reduce clicks when handling the .rsk files and detecting the SOMLIT days and profiles
 - Channel auto-detection means the same code path handles RBR Maestro (with DO, pH, fluorometer, etc.) and RBR Concerto (typically CTD + PAR only) transparently, and any mix of probe types in the same processing run
 - Plots are to help the user choose between the down or the upcast which to save in the SOMLIT DB.
+
+## C-T lag correction
+
+The thermistor responds more slowly than the conductivity cell. Without realignment, salinity computed in a thermocline shows spikes (a late temperature reads too warm on a downcast into colder water, so salinity spikes low). With a 2 Hz RBR Concerto and 0.25 m bins, most bins hold a single sample, so these spikes go straight into the SOMLIT output.
+
+`procRSK()` resolves the lag applied to the temperature channel (`RSK.alignchannel`) from `Parameters/processing_config.py`:
+- `CT_LAG_MODE = "auto"` (default): the lag is estimated on the downcast of each profile by minimising salinity spikiness, searched in whole sample periods (the lag cannot be resolved below one sample: 0.5 s at 2 Hz, 0.125 s at 8 Hz). If the profile has no salinity gradient or the estimate brings no improvement, the per-probe default is used.
+- `CT_LAG_MODE = <number>`: fixed lag in seconds for every profile. `None`: per-probe default.
+- `CT_LAG_PROBE_DEFAULTS`: fallback lag per instrument model (`RBRconcerto`: -0.5 s, `RBRmaestro`: -0.045 s).
+
+The lag applied is printed and written to the processing log of the exported CSV. Passing `ct_lag=` to `procRSK()` / `process_rsk_folder()` overrides the configuration.
+
+Effect on the Sète Concerto 241494 (2 Hz), downcasts of 14 RBR/SBE pairs on 10 dates (May-Nov 2026): median of the maximum |S(RBR) - S(SBE)| per profile 0.24 -> 0.18 PSU, worst case 0.62 -> 0.25 PSU, median debiased RMS 0.060 -> 0.036 PSU, bins with |dS - median| > 0.1 PSU per profile: median 5 -> 0.5. The estimate was -0.5 s (one sample) on every profile with a gradient.
+
+References: pyRSKtools documentation (`RSK.alignchannel`, `RSK.calculateCTlag`); Halverson et al. (2017), *Guidelines for processing RBR CTD profiles*, Can. Tech. Rep. Hydrogr. Ocean Sci. 314.
 
 ## Changelog / Recent updates (2026)
 
